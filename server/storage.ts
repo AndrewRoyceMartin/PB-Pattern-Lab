@@ -1,38 +1,42 @@
-import { type User, type InsertUser } from "@shared/schema";
-import { randomUUID } from "crypto";
+import { type Draw, type InsertDraw, draws } from "@shared/schema";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { eq, desc, sql } from "drizzle-orm";
+import pg from "pg";
 
-// modify the interface with any CRUD methods
-// you might need
+const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+const db = drizzle(pool);
 
 export interface IStorage {
-  getUser(id: string): Promise<User | undefined>;
-  getUserByUsername(username: string): Promise<User | undefined>;
-  createUser(user: InsertUser): Promise<User>;
+  insertDraws(drawList: InsertDraw[]): Promise<Draw[]>;
+  getAllDraws(): Promise<Draw[]>;
+  getModernDraws(): Promise<Draw[]>;
+  getDrawCount(): Promise<number>;
+  clearDraws(): Promise<void>;
 }
 
-export class MemStorage implements IStorage {
-  private users: Map<string, User>;
-
-  constructor() {
-    this.users = new Map();
+export class DatabaseStorage implements IStorage {
+  async insertDraws(drawList: InsertDraw[]): Promise<Draw[]> {
+    if (drawList.length === 0) return [];
+    const inserted = await db.insert(draws).values(drawList).returning();
+    return inserted;
   }
 
-  async getUser(id: string): Promise<User | undefined> {
-    return this.users.get(id);
+  async getAllDraws(): Promise<Draw[]> {
+    return db.select().from(draws).orderBy(desc(draws.drawNumber));
   }
 
-  async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username === username,
-    );
+  async getModernDraws(): Promise<Draw[]> {
+    return db.select().from(draws).where(eq(draws.isModernFormat, true)).orderBy(desc(draws.drawNumber));
   }
 
-  async createUser(insertUser: InsertUser): Promise<User> {
-    const id = randomUUID();
-    const user: User = { ...insertUser, id };
-    this.users.set(id, user);
-    return user;
+  async getDrawCount(): Promise<number> {
+    const result = await db.select({ count: sql<number>`count(*)` }).from(draws);
+    return Number(result[0].count);
+  }
+
+  async clearDraws(): Promise<void> {
+    await db.delete(draws);
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new DatabaseStorage();
