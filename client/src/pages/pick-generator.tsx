@@ -2,11 +2,25 @@ import { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Zap, Play, CheckCircle, SearchX, Loader2, Info } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { generatePicks, fetchApi } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
 import type { GeneratedPick, GeneratorMode } from "@shared/schema";
+
+function Tip({ label, tip, className }: { label: string; tip: string; className?: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className={`${className ?? ""} cursor-help border-b border-dotted border-current`}>{label}</span>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-xs text-xs">
+        <p>{tip}</p>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
 
 const MODES: { value: GeneratorMode; label: string; description: string; drawFit: number; antiPop: number; group?: string }[] = [
   { value: "balanced", label: "Balanced", description: "60% pattern signals, 40% anti-popularity", drawFit: 60, antiPop: 40 },
@@ -106,11 +120,11 @@ export default function PickGenerator() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="flex justify-between text-sm font-mono">
-                  <span className="text-primary">Draw-Fit</span>
+                  <Tip label="Draw-Fit" tip="Weight given to historical pattern signals (frequency, recency, structure, trends). Higher = picks lean more toward numbers that match past draw patterns." className="text-primary" />
                   <span className="font-bold text-primary">{drawFitWeight}%</span>
                 </div>
                 <div className="flex justify-between text-sm font-mono">
-                  <span className="text-yellow-500">Anti-Popularity</span>
+                  <Tip label="Anti-Popularity" tip="Weight given to avoiding popular number choices. Higher = picks lean more toward combinations other players are unlikely to choose, reducing split risk." className="text-yellow-500" />
                   <span className="font-bold text-yellow-500">{antiPopWeight}%</span>
                 </div>
                 <Slider defaultValue={[40]} max={100} step={5} onValueChange={setCustomAntiPop} data-testid="slider-anti-pop" />
@@ -124,11 +138,11 @@ export default function PickGenerator() {
               <CardTitle className="text-sm font-mono text-muted-foreground uppercase tracking-wider">Anti-Popularity Penalties</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2 font-mono text-xs">
-              <div className="flex items-center text-muted-foreground"><CheckCircle className="w-3 h-3 mr-2 text-green-500" /> Birthday concentration (&le;31)</div>
-              <div className="flex items-center text-muted-foreground"><CheckCircle className="w-3 h-3 mr-2 text-green-500" /> Sequence detection</div>
-              <div className="flex items-center text-muted-foreground"><CheckCircle className="w-3 h-3 mr-2 text-green-500" /> Repeated endings</div>
-              <div className="flex items-center text-muted-foreground"><CheckCircle className="w-3 h-3 mr-2 text-green-500" /> Aesthetic pattern</div>
-              <div className="flex items-center text-muted-foreground"><CheckCircle className="w-3 h-3 mr-2 text-green-500" /> Low Powerball bias</div>
+              <div className="flex items-center text-muted-foreground"><CheckCircle className="w-3 h-3 mr-2 text-green-500" /> <Tip label="Birthday concentration (≤31)" tip="Penalises picks where too many numbers are 31 or below, since many players pick birthdates. Avoiding these reduces the chance of splitting a prize." className="text-muted-foreground" /></div>
+              <div className="flex items-center text-muted-foreground"><CheckCircle className="w-3 h-3 mr-2 text-green-500" /> <Tip label="Sequence detection" tip="Penalises consecutive number runs like 5-6-7. Sequences are a common player favourite, so avoiding them means fewer co-winners." className="text-muted-foreground" /></div>
+              <div className="flex items-center text-muted-foreground"><CheckCircle className="w-3 h-3 mr-2 text-green-500" /> <Tip label="Repeated endings" tip="Penalises picks where multiple numbers share the same last digit (e.g. 5, 15, 25). These patterns are popular with players." className="text-muted-foreground" /></div>
+              <div className="flex items-center text-muted-foreground"><CheckCircle className="w-3 h-3 mr-2 text-green-500" /> <Tip label="Aesthetic pattern" tip="Penalises visually 'neat' patterns people tend to pick, like evenly spaced numbers or symmetric arrangements on the ticket grid." className="text-muted-foreground" /></div>
+              <div className="flex items-center text-muted-foreground"><CheckCircle className="w-3 h-3 mr-2 text-green-500" /> <Tip label="Low Powerball bias" tip="Penalises very low Powerball numbers (1–5). Many players gravitate to small numbers for the Powerball, increasing split risk." className="text-muted-foreground" /></div>
             </CardContent>
           </Card>
         </div>
@@ -164,17 +178,17 @@ export default function PickGenerator() {
 
                     <div className="flex items-center space-x-3 ml-12 md:ml-0 font-mono text-xs">
                       <div className="flex flex-col items-end">
-                        <span className="text-muted-foreground">Draw-Fit</span>
+                        <Tip label="Draw-Fit" tip="How well these numbers match historical patterns — frequency, recency, structure, and trend signals. Higher = better fit to past draws." className="text-muted-foreground" />
                         <span className="text-primary">{pick.drawFit}</span>
                       </div>
                       <div className="w-px h-8 bg-border"></div>
                       <div className="flex flex-col items-end">
-                        <span className="text-muted-foreground">Anti-Pop</span>
+                        <Tip label="Anti-Pop" tip="How unpopular this combination is among typical players. Higher = fewer people likely picked these numbers, meaning less chance of splitting a jackpot." className="text-muted-foreground" />
                         <span className="text-yellow-500">{pick.antiPop}</span>
                       </div>
                       <div className="w-px h-8 bg-border"></div>
                       <div className="flex flex-col items-end">
-                        <span className="text-muted-foreground font-bold">SCORE</span>
+                        <Tip label="SCORE" tip="The final combined score, blending Draw-Fit and Anti-Pop based on the weights set by your chosen mode. Higher = better overall pick." className="text-muted-foreground font-bold" />
                         <span className={`font-bold ${i === 0 ? 'text-primary text-base' : ''}`}>{pick.finalScore.toFixed(1)}</span>
                       </div>
                     </div>
