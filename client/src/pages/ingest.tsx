@@ -1,8 +1,26 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { UploadCloud, FileType, CheckCircle } from "lucide-react";
+import { UploadCloud, FileType, CheckCircle, Clock } from "lucide-react";
+import { useState } from "react";
+import { useToast } from "@/hooks/use-toast";
 
 export default function Ingest() {
+  const { toast } = useToast();
+  const [isUploading, setIsUploading] = useState(false);
+  const [hasFile, setHasFile] = useState(false);
+
+  const handleSimulateUpload = () => {
+    setIsUploading(true);
+    setTimeout(() => {
+      setIsUploading(false);
+      setHasFile(true);
+      toast({
+        title: "File processed",
+        description: "Dataset uploaded successfully in mockup mode.",
+      });
+    }, 1500);
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -23,10 +41,12 @@ export default function Ingest() {
               Drag and drop your AU Powerball history file here, or click to browse.
             </p>
           </div>
-          <Button variant="outline" className="mt-4">
-            <FileType className="w-4 h-4 mr-2" />
-            Select File
-          </Button>
+          <div className="flex gap-4 mt-4">
+            <Button variant="outline" onClick={handleSimulateUpload} disabled={isUploading}>
+              <FileType className="w-4 h-4 mr-2" />
+              {isUploading ? "Uploading..." : "Select File"}
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
@@ -38,20 +58,32 @@ export default function Ingest() {
           </CardHeader>
           <CardContent className="space-y-4 font-mono text-sm">
             <div className="flex items-center justify-between p-3 rounded bg-secondary/50 border border-border/50">
-              <span className="flex items-center"><CheckCircle className="w-4 h-4 mr-2 text-green-500" /> Parsed schema headers</span>
-              <span className="text-green-500">OK</span>
+              <span className="flex items-center">
+                {hasFile ? <CheckCircle className="w-4 h-4 mr-2 text-green-500" /> : <Clock className="w-4 h-4 mr-2 text-muted-foreground" />}
+                Parsed schema headers
+              </span>
+              <span className={hasFile ? "text-green-500" : "text-muted-foreground"}>{hasFile ? "OK" : "Waiting"}</span>
             </div>
             <div className="flex items-center justify-between p-3 rounded bg-secondary/50 border border-border/50">
-              <span className="flex items-center"><CheckCircle className="w-4 h-4 mr-2 text-green-500" /> Modern format filter (7 mains)</span>
-              <span className="text-green-500">OK</span>
+              <span className="flex items-center">
+                {hasFile ? <CheckCircle className="w-4 h-4 mr-2 text-green-500" /> : <Clock className="w-4 h-4 mr-2 text-muted-foreground" />}
+                Modern format filter (7 mains)
+              </span>
+              <span className={hasFile ? "text-green-500" : "text-muted-foreground"}>{hasFile ? "OK" : "Waiting"}</span>
             </div>
             <div className="flex items-center justify-between p-3 rounded bg-secondary/50 border border-border/50">
-              <span className="flex items-center"><CheckCircle className="w-4 h-4 mr-2 text-green-500" /> Timezone handling (AU Local)</span>
-              <span className="text-green-500">OK</span>
+              <span className="flex items-center">
+                {hasFile ? <CheckCircle className="w-4 h-4 mr-2 text-green-500" /> : <Clock className="w-4 h-4 mr-2 text-muted-foreground" />}
+                Timezone handling (AU Local)
+              </span>
+              <span className={hasFile ? "text-green-500" : "text-muted-foreground"}>{hasFile ? "OK" : "Waiting"}</span>
             </div>
             <div className="flex items-center justify-between p-3 rounded bg-secondary/50 border border-border/50">
-              <span className="flex items-center"><CheckCircle className="w-4 h-4 mr-2 text-green-500" /> Duplicate/Error checking</span>
-              <span className="text-green-500">OK</span>
+              <span className="flex items-center">
+                {hasFile ? <CheckCircle className="w-4 h-4 mr-2 text-green-500" /> : <Clock className="w-4 h-4 mr-2 text-muted-foreground" />}
+                Duplicate/Error checking
+              </span>
+              <span className={hasFile ? "text-green-500" : "text-muted-foreground"}>{hasFile ? "OK" : "Waiting"}</span>
             </div>
           </CardContent>
         </Card>
@@ -63,15 +95,15 @@ export default function Ingest() {
           <CardContent className="space-y-4">
             <div className="space-y-1">
               <span className="text-xs text-muted-foreground uppercase tracking-wider">Total Rows</span>
-              <div className="text-2xl font-mono">1,445</div>
+              <div className={`text-2xl font-mono ${hasFile ? "" : "text-muted-foreground"}`}>{hasFile ? "1,445" : "0"}</div>
             </div>
             <div className="space-y-1">
               <span className="text-xs text-muted-foreground uppercase tracking-wider">Valid Modern Era</span>
-              <div className="text-2xl font-mono text-primary">824</div>
+              <div className={`text-2xl font-mono ${hasFile ? "text-primary" : "text-muted-foreground"}`}>{hasFile ? "824" : "0"}</div>
             </div>
             <div className="space-y-1">
               <span className="text-xs text-muted-foreground uppercase tracking-wider">Last Draw Date</span>
-              <div className="text-xl font-mono">2024-01-25</div>
+              <div className={`text-xl font-mono ${hasFile ? "" : "text-muted-foreground"}`}>{hasFile ? "2024-01-25" : "N/A"}</div>
             </div>
           </CardContent>
         </Card>

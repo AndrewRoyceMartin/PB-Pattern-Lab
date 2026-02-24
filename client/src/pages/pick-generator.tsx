@@ -3,12 +3,22 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { mockGeneratedPicks } from "@/lib/mock-data";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
-import { Badge } from "@/components/ui/badge";
-import { Zap, Play, CheckCircle } from "lucide-react";
+import { Zap, Play, CheckCircle, SearchX } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 
 export default function PickGenerator() {
+  const { toast } = useToast();
   const [antiPopWeight, setAntiPopWeight] = useState([40]);
   const drawFitWeight = 100 - antiPopWeight[0];
+  const hasData = mockGeneratedPicks.length > 0;
+
+  const handleGenerate = () => {
+    toast({
+      title: "No Data Available",
+      description: "Please upload a dataset first to generate picks based on patterns.",
+      variant: "destructive",
+    });
+  };
 
   return (
     <div className="space-y-6">
@@ -19,7 +29,7 @@ export default function PickGenerator() {
             Generate ranked picks using validated signals and anti-popularity scoring.
           </p>
         </div>
-        <Button className="bg-primary hover:bg-primary/90 text-primary-foreground font-mono font-bold">
+        <Button onClick={handleGenerate} className="bg-primary hover:bg-primary/90 text-primary-foreground font-mono font-bold">
           <Play className="w-4 h-4 mr-2" /> GENERATE (TOP 10)
         </Button>
       </div>
@@ -73,51 +83,59 @@ export default function PickGenerator() {
             GENERATED CANDIDATES [CONFIDENCE RANKED]
           </h3>
           
-          <div className="space-y-3">
-            {mockGeneratedPicks.map((pick, i) => (
-              <div key={i} className={`p-4 rounded-lg border ${i === 0 ? 'bg-primary/5 border-primary/30' : 'bg-card border-border/50'} relative overflow-hidden group hover:border-primary/50 transition-colors`}>
-                
-                {i === 0 && <div className="absolute top-0 right-0 w-16 h-16 bg-primary/10 rounded-bl-full -mr-8 -mt-8 pointer-events-none"></div>}
-                
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                  <div className="flex items-center space-x-4">
-                    <div className={`w-8 text-center font-mono font-bold text-lg ${i === 0 ? 'text-primary' : 'text-muted-foreground'}`}>
-                      #{pick.rank}
+          {hasData ? (
+            <div className="space-y-3">
+              {mockGeneratedPicks.map((pick, i) => (
+                <div key={i} className={`p-4 rounded-lg border ${i === 0 ? 'bg-primary/5 border-primary/30' : 'bg-card border-border/50'} relative overflow-hidden group hover:border-primary/50 transition-colors`}>
+                  
+                  {i === 0 && <div className="absolute top-0 right-0 w-16 h-16 bg-primary/10 rounded-bl-full -mr-8 -mt-8 pointer-events-none"></div>}
+                  
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div className="flex items-center space-x-4">
+                      <div className={`w-8 text-center font-mono font-bold text-lg ${i === 0 ? 'text-primary' : 'text-muted-foreground'}`}>
+                        #{pick.rank}
+                      </div>
+                      
+                      <div className="flex space-x-2">
+                        {pick.numbers.map((n: number, idx: number) => (
+                          <div key={idx} className="w-9 h-9 rounded bg-secondary flex items-center justify-center font-mono text-sm border border-border/80 shadow-sm">
+                            {n.toString().padStart(2, '0')}
+                          </div>
+                        ))}
+                        <div className="w-9 h-9 rounded bg-primary/20 text-primary border border-primary/30 flex items-center justify-center font-mono text-sm font-bold shadow-sm ml-2 relative">
+                          <Zap className="w-3 h-3 absolute -top-1 -right-1 text-yellow-500" />
+                          {pick.powerball.toString().padStart(2, '0')}
+                        </div>
+                      </div>
                     </div>
                     
-                    <div className="flex space-x-2">
-                      {pick.numbers.map((n, idx) => (
-                        <div key={idx} className="w-9 h-9 rounded bg-secondary flex items-center justify-center font-mono text-sm border border-border/80 shadow-sm">
-                          {n.toString().padStart(2, '0')}
-                        </div>
-                      ))}
-                      <div className="w-9 h-9 rounded bg-primary/20 text-primary border border-primary/30 flex items-center justify-center font-mono text-sm font-bold shadow-sm ml-2 relative">
-                        <Zap className="w-3 h-3 absolute -top-1 -right-1 text-yellow-500" />
-                        {pick.powerball.toString().padStart(2, '0')}
+                    <div className="flex items-center space-x-3 ml-12 md:ml-0 font-mono text-xs">
+                      <div className="flex flex-col items-end">
+                        <span className="text-muted-foreground">Draw-Fit</span>
+                        <span className="text-primary">{pick.drawFit}</span>
+                      </div>
+                      <div className="w-px h-8 bg-border"></div>
+                      <div className="flex flex-col items-end">
+                        <span className="text-muted-foreground">Anti-Pop</span>
+                        <span className="text-yellow-500">{pick.antiPop}</span>
+                      </div>
+                      <div className="w-px h-8 bg-border"></div>
+                      <div className="flex flex-col items-end">
+                        <span className="text-muted-foreground font-bold">SCORE</span>
+                        <span className={`font-bold ${i === 0 ? 'text-primary text-base' : ''}`}>{pick.finalScore.toFixed(1)}</span>
                       </div>
                     </div>
                   </div>
-                  
-                  <div className="flex items-center space-x-3 ml-12 md:ml-0 font-mono text-xs">
-                    <div className="flex flex-col items-end">
-                      <span className="text-muted-foreground">Draw-Fit</span>
-                      <span className="text-primary">{pick.drawFit}</span>
-                    </div>
-                    <div className="w-px h-8 bg-border"></div>
-                    <div className="flex flex-col items-end">
-                      <span className="text-muted-foreground">Anti-Pop</span>
-                      <span className="text-yellow-500">{pick.antiPop}</span>
-                    </div>
-                    <div className="w-px h-8 bg-border"></div>
-                    <div className="flex flex-col items-end">
-                      <span className="text-muted-foreground font-bold">SCORE</span>
-                      <span className={`font-bold ${i === 0 ? 'text-primary text-base' : ''}`}>{pick.finalScore.toFixed(1)}</span>
-                    </div>
-                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-20 text-muted-foreground border border-dashed border-border/50 rounded-lg bg-secondary/10">
+              <SearchX className="w-12 h-12 mb-4 opacity-20" />
+              <p className="font-mono">No picks generated.</p>
+              <p className="text-sm opacity-70 mt-1">Upload data and run generation engine.</p>
+            </div>
+          )}
         </div>
       </div>
     </div>
