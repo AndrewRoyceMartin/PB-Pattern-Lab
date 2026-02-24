@@ -1,0 +1,356 @@
+You’re adding a “Most Drawn Numbers” strategy as a proper benchmark and testing it against random. That’s exactly the right move.
+
+Replit Instructions — Add “Most Drawn” Strategy + Backtest Comparison
+Goal
+
+Add these strategy variants to your app:
+
+most_drawn_all_time
+
+most_drawn_last_50
+
+most_drawn_last_100
+
+Then include them in your walk-forward validation so you can see if they beat random.
+
+Step 1 — Create a strategy module on the server
+File to add
+
+server/strategies.ts
+
+What to put in it (functions)
+
+Create functions for:
+
+getMostDrawnScores(draws, mode, windowSize?)
+
+Returns ranked scores for main numbers (1–35) and Powerball (1–20)
+
+Uses training draws only
+
+buildMostDrawnCards(scoredMain, scoredPb, config)
+
+Generates top 10 cards from ranked scores
+
+Reuse your existing generator logic if possible
+
+runMostDrawnStrategy(trainDraws, config, variant)
+
+Wrapper to produce cards for:
+
+all_time
+
+last_50
+
+last_100
+
+Replit action
+
+In Replit file tree, click Add file
+
+Create server/strategies.ts
+
+Step 2 — Implement frequency counting (training data only)
+Important rule
+
+When backtesting, never use future draws.
+
+Inside the strategy function:
+
+If current test draw index = i
+
+Training draws = draws.slice(0, i)
+
+For rolling variants:
+
+last_50 => use trainDraws.slice(-50)
+
+last_100 => use trainDraws.slice(-100)
+
+Count separately
+
+Main numbers frequency (1..35)
+
+Powerball frequency (1..20)
+
+Tie-breaking (important)
+
+When two numbers have the same count, sort by:
+
+higher count
+
+more recent appearance (optional but useful)
+
+lower number (stable fallback)
+
+This keeps outputs deterministic.
+
+Step 3 — Add strategy names to your shared types/schema
+File to edit
+
+shared/schema.ts (or wherever your strategy enums/types live)
+
+Add new strategy enum values
+
+Add:
+
+most_drawn_all_time
+
+most_drawn_last_50
+
+most_drawn_last_100
+
+If you have a Zod enum or union type for strategies, update it there too.
+
+Replit action
+
+Search for strategy, generator mode, or similar in shared/
+
+Add the new values in all relevant places
+
+Step 4 — Wire the strategy into the validation engine
+File to edit
+
+server/analysis.ts (or your validation runner file)
+
+What to change
+
+In your walk-forward validation loop (where you currently test random/composite/etc.):
+
+Add these strategies to the benchmark set
+
+random
+
+most_drawn_all_time
+
+most_drawn_last_50
+
+most_drawn_last_100
+
+(existing) recency/composite/etc.
+
+For each test draw
+
+Build cards for each strategy
+
+Score them against actual draw
+
+Store results in the same result table format
+
+Metrics to capture (same as current, if already present)
+
+best_main_matches
+
+avg_main_matches
+
+best_powerball_match
+
+best_total_match_score
+
+unique_main_combos_generated
+
+unique_powerballs_generated
+
+Step 5 — Add strategy controls in the Generator page
+File to edit
+
+client/src/pages/generator.tsx (or your generator component path)
+
+Add UI options
+
+In your strategy selector / mode dropdown, include:
+
+Most Drawn (All-Time)
+
+Most Drawn (Last 50)
+
+Most Drawn (Last 100)
+
+Expected behavior
+
+When selected:
+
+Call your existing /api/generate endpoint
+
+Pass selected strategy value
+
+Backend returns top 10 ranked cards using that strategy
+
+Step 6 — Add benchmark comparison display in Validation page
+File to edit
+
+client/src/pages/validation.tsx
+
+What to show
+
+Add a comparison table with rows for each strategy:
+
+Random
+
+Most Drawn (All-Time)
+
+Most Drawn (Last 50)
+
+Most Drawn (Last 100)
+
+Existing strategies
+
+Columns (recommended)
+
+Test draws
+
+Mean best main matches
+
+Mean best total score
+
+Powerball hit rate
+
+Beats random? (yes/no)
+
+Delta vs random
+
+Add a verdict line
+
+Examples:
+
+No edge: Most Drawn strategies did not beat random in walk-forward tests.
+
+Weak edge: Most Drawn (Last 50) slightly beat random in selected windows only.
+
+Possible edge: Most Drawn (Last 100) consistently beat random across windows.
+
+Step 7 — Add rolling-window tests (important)
+
+Don’t test only one backtest window.
+
+In Validation settings UI, run at least:
+
+20 draws
+
+40 draws
+
+60 draws
+
+If your app supports one at a time, run them manually and compare.
+If you want later, automate a “multi-window benchmark” mode.
+
+Why
+
+“Most drawn” can look good in one window by chance.
+
+Step 8 — Add a plain-English summary for Most Drawn
+
+In your summary/report text, add something like:
+
+“Most Drawn (All-Time) is a descriptive strategy based on historical frequency and serves as a benchmark. It does not imply future draws are dependent on past draws.”
+
+Then report whether it beat random out-of-sample.
+
+This keeps the app credible.
+
+Step 9 — Keep generator diversity healthy (important)
+
+A common issue with frequency-based strategies is low diversity.
+
+Add/verify these controls in generator config
+
+top_n_games = 10
+
+combo_pool_main_n (e.g. 14–18)
+
+pb_candidates_n (e.g. 3–10)
+
+If PB diversity is too low (e.g., always same PB), increase pb_candidates_n.
+
+Step 10 — Test in Replit (manual test checklist)
+A) Generator page
+
+Select Most Drawn (All-Time)
+
+Generate picks
+
+Confirm 10 cards appear
+
+Confirm cards are valid (7 unique mains + 1 PB)
+
+B) Validation page
+
+Run backtest with random + most drawn strategies
+
+Confirm rows appear for all strategies
+
+Confirm deltas vs random compute correctly
+
+C) Leakage sanity check
+
+Spot-check code to confirm:
+
+current test draw is excluded from strategy counts
+
+This is the most important test.
+
+Suggested implementation order (fastest path)
+
+Do these in order:
+
+server/strategies.ts — implement most-drawn scoring + card generation wrapper
+
+shared/schema.ts — add strategy enum values
+
+server/analysis.ts — include new strategies in backtest
+
+client validation page — show benchmark table
+
+client generator page — add strategy selector options
+
+Replit “Plan Work” tasks (copy/paste)
+
+Use this in Replit planning mode:
+
+Task 1 — Add Most Drawn strategy module
+
+Create server/strategies.ts
+
+Implement frequency counters for main numbers and Powerball
+
+Add strategy variants: all-time, last_50, last_100
+
+Return ranked scores and generated top 10 cards
+
+Task 2 — Update shared strategy types
+
+Add most_drawn_all_time, most_drawn_last_50, most_drawn_last_100
+
+Update any Zod enums / request DTOs / response types
+
+Task 3 — Integrate Most Drawn into walk-forward validation
+
+Add strategy runs in validation benchmark loop
+
+Ensure train/test separation (no leakage)
+
+Capture metrics and deltas vs random
+
+Task 4 — Add Generator UI strategy options
+
+Add Most Drawn variants to strategy selector
+
+Ensure /api/generate request passes selected strategy
+
+Display returned cards and confidence/rank
+
+Task 5 — Add Validation benchmark table + verdict text
+
+Show results by strategy
+
+Add “beats random” flag and delta columns
+
+Add plain-English summary for Most Drawn performance
+
+Task 6 — Run validation across multiple windows
+
+Test 20 / 40 / 60 draw windows
+
+Compare consistency of Most Drawn vs Random
+
+Record findings in replit.md

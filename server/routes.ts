@@ -9,6 +9,7 @@ import {
   runRandomnessAudit,
   runWalkForwardValidation,
   generateRankedPicks,
+  generateMostDrawnCards,
 } from "./analysis";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -159,9 +160,19 @@ export async function registerRoutes(
     try {
       const { count = 10, mode = "balanced" } = req.body || {};
 
+      const draws = await storage.getModernDraws();
+      if (draws.length === 0) {
+        return res.status(400).json({ ok: false, message: "No draws available. Upload data first." });
+      }
+
+      if (mode === "most_drawn_all_time" || mode === "most_drawn_last_50" || mode === "most_drawn_last_100") {
+        const windowSize = mode === "most_drawn_last_50" ? 50 : mode === "most_drawn_last_100" ? 100 : draws.length;
+        const picks = generateMostDrawnCards(draws, windowSize, count);
+        return res.json(apiResponse(draws, picks));
+      }
+
       let drawFitWeight: number;
       let antiPopWeight: number;
-
       switch (mode as GeneratorMode) {
         case "anti_popular":
           drawFitWeight = 20; antiPopWeight = 80; break;
@@ -174,10 +185,6 @@ export async function registerRoutes(
           antiPopWeight = req.body?.antiPopWeight ?? 40;
       }
 
-      const draws = await storage.getModernDraws();
-      if (draws.length === 0) {
-        return res.status(400).json({ ok: false, message: "No draws available. Upload data first." });
-      }
       const picks = generateRankedPicks(draws, count, drawFitWeight, antiPopWeight);
       res.json(apiResponse(draws, picks));
     } catch (error: any) {

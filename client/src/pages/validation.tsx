@@ -1,6 +1,6 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { AlertCircle, Target, GitCompare, LayoutDashboard, TrendingUp, BarChart3 } from "lucide-react";
+import { AlertCircle, Target, GitCompare, LayoutDashboard, TrendingUp, BarChart3, Info } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchApi } from "@/lib/api";
 import type { ValidationSummary } from "@shared/schema";
@@ -71,31 +71,47 @@ export default function Validation() {
             </CardDescription>
           </CardHeader>
           <CardContent className="flex-1 flex flex-col">
-            {hasData ? (
-              <div className="space-y-5">
-                {validation.byStrategy.map((result, i) => {
-                  const isComposite = result.strategy === "Composite Model";
-                  const barValue = Math.min(100, (result.avgMainMatches / 7) * 100);
-                  return (
-                    <div key={i} className="space-y-2">
-                      <div className="flex justify-between items-center text-sm font-mono">
-                        <span className={`font-bold ${isComposite ? 'text-primary' : ''}`}>{result.strategy}</span>
-                        <div className="flex gap-4 text-xs text-muted-foreground">
-                          <span>Best: {result.bestMainMatches}/7</span>
-                          <span>PB: {result.powerballHits}/{result.testDraws} ({result.powerballHitRate}%)</span>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <Progress value={barValue} className="h-2 flex-1" />
-                        <span className={`font-mono text-sm font-bold w-12 text-right ${isComposite ? 'text-primary' : ''}`}>
-                          {result.avgMainMatches}
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
+            {hasData ? (() => {
+              const randomAvg = validation.byStrategy.find(s => s.strategy === "Random")?.avgMainMatches ?? 0;
+              return (
+                <div className="rounded-md border border-border/50 overflow-hidden">
+                  <table className="w-full text-sm font-mono text-left">
+                    <thead className="bg-secondary/50">
+                      <tr>
+                        <th className="p-3 text-muted-foreground font-medium">Strategy</th>
+                        <th className="p-3 text-muted-foreground font-medium text-right">Avg Match</th>
+                        <th className="p-3 text-muted-foreground font-medium text-right">Best</th>
+                        <th className="p-3 text-muted-foreground font-medium text-right">PB Rate</th>
+                        <th className="p-3 text-muted-foreground font-medium text-right">vs Random</th>
+                        <th className="p-3 text-muted-foreground font-medium text-center">Beats?</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/50">
+                      {validation.byStrategy.map((result, i) => {
+                        const isRandom = result.strategy === "Random";
+                        const delta = result.avgMainMatches - randomAvg;
+                        const beats = !isRandom && delta > 0;
+                        const isMostDrawn = result.strategy.startsWith("Most Drawn");
+                        return (
+                          <tr key={i} className={`hover:bg-secondary/20 transition-colors ${isMostDrawn ? "bg-blue-500/5" : ""}`}>
+                            <td className={`p-3 font-bold ${isMostDrawn ? "text-blue-400" : isRandom ? "text-muted-foreground" : ""}`}>{result.strategy}</td>
+                            <td className="p-3 text-right font-bold">{result.avgMainMatches}</td>
+                            <td className="p-3 text-right">{result.bestMainMatches}/7</td>
+                            <td className="p-3 text-right">{result.powerballHitRate}%</td>
+                            <td className={`p-3 text-right font-bold ${isRandom ? "text-muted-foreground" : delta > 0 ? "text-green-500" : delta < 0 ? "text-red-500" : ""}`}>
+                              {isRandom ? "--" : `${delta >= 0 ? "+" : ""}${delta.toFixed(2)}`}
+                            </td>
+                            <td className="p-3 text-center">
+                              {isRandom ? "--" : beats ? <span className="text-green-500 font-bold">YES</span> : <span className="text-muted-foreground">NO</span>}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })() : (
               <div className="flex-1 flex flex-col items-center justify-center py-10 text-muted-foreground border border-dashed rounded-lg bg-secondary/10">
                 <LayoutDashboard className="w-8 h-8 mb-2 opacity-30" />
                 <p className="font-mono text-sm">{stats?.modernDraws > 0 ? "Need 50+ modern draws for validation." : "Awaiting dataset upload."}</p>
@@ -196,6 +212,35 @@ export default function Validation() {
           </CardContent>
         </Card>
       )}
+
+      {hasData && (() => {
+        const randomAvg = validation.byStrategy.find(s => s.strategy === "Random")?.avgMainMatches ?? 0;
+        const mostDrawnStrategies = validation.byStrategy.filter(s => s.strategy.startsWith("Most Drawn"));
+        if (mostDrawnStrategies.length === 0) return null;
+        const bestMD = mostDrawnStrategies.reduce((best, s) => s.avgMainMatches > best.avgMainMatches ? s : best, mostDrawnStrategies[0]);
+        const bestDelta = bestMD.avgMainMatches - randomAvg;
+        const anyBeat = mostDrawnStrategies.some(s => s.avgMainMatches > randomAvg);
+        return (
+          <Card className="border-border border-blue-500/20 bg-blue-500/5">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center text-blue-400">
+                <Info className="w-5 h-5 mr-2" /> Most Drawn Benchmark Summary
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm text-muted-foreground">
+              <p>
+                Most Drawn strategies are descriptive benchmarks based on historical frequency. They do not imply future draws are dependent on past draws — lottery outcomes are independent events.
+              </p>
+              <p className="font-mono">
+                {anyBeat
+                  ? `${bestMD.strategy} averaged ${bestMD.avgMainMatches} main matches vs ${randomAvg} for random (delta ${bestDelta >= 0 ? "+" : ""}${bestDelta.toFixed(2)}). While this shows a positive result in this test window, frequency patterns should be monitored across multiple windows for consistency.`
+                  : `No Most Drawn variant beat random in this walk-forward test. This is expected — lottery draws are designed to be random. The anti-popularity engine remains the most practical edge.`
+                }
+              </p>
+            </CardContent>
+          </Card>
+        );
+      })()}
     </div>
   );
 }

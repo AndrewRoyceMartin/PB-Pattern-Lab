@@ -92,7 +92,7 @@ export interface ValidationSummary {
   };
 }
 
-export type GeneratorMode = "balanced" | "anti_popular" | "pattern_only" | "random_baseline";
+export type GeneratorMode = "balanced" | "anti_popular" | "pattern_only" | "random_baseline" | "most_drawn_all_time" | "most_drawn_last_50" | "most_drawn_last_100";
 
 export interface GeneratorConfig {
   mode: GeneratorMode;

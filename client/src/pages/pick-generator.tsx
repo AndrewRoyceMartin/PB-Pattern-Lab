@@ -8,10 +8,13 @@ import { generatePicks, fetchApi } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
 import type { GeneratedPick, GeneratorMode } from "@shared/schema";
 
-const MODES: { value: GeneratorMode; label: string; description: string; drawFit: number; antiPop: number }[] = [
+const MODES: { value: GeneratorMode; label: string; description: string; drawFit: number; antiPop: number; group?: string }[] = [
   { value: "balanced", label: "Balanced", description: "60% pattern signals, 40% anti-popularity", drawFit: 60, antiPop: 40 },
   { value: "anti_popular", label: "Low Split-Risk", description: "20% pattern, 80% anti-popularity", drawFit: 20, antiPop: 80 },
   { value: "pattern_only", label: "Experimental Pattern", description: "100% pattern signals (experimental)", drawFit: 100, antiPop: 0 },
+  { value: "most_drawn_all_time", label: "Most Drawn (All-Time)", description: "Top frequency numbers from full history", drawFit: 100, antiPop: 0, group: "frequency" },
+  { value: "most_drawn_last_50", label: "Most Drawn (Last 50)", description: "Top frequency from last 50 draws", drawFit: 100, antiPop: 0, group: "frequency" },
+  { value: "most_drawn_last_100", label: "Most Drawn (Last 100)", description: "Top frequency from last 100 draws", drawFit: 100, antiPop: 0, group: "frequency" },
   { value: "random_baseline", label: "Random Baseline", description: "Pure random for comparison", drawFit: 0, antiPop: 0 },
 ];
 
@@ -69,21 +72,29 @@ export default function PickGenerator() {
               <CardDescription>Choose generation strategy</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              {MODES.map((mode) => (
-                <button
-                  key={mode.value}
-                  onClick={() => setSelectedMode(mode.value)}
-                  className={`w-full text-left p-3 rounded-md border transition-colors ${
-                    selectedMode === mode.value
-                      ? "border-primary bg-primary/10 text-foreground"
-                      : "border-border/50 hover:border-border hover:bg-secondary/30 text-muted-foreground"
-                  }`}
-                  data-testid={`button-mode-${mode.value}`}
-                >
-                  <div className="font-medium text-sm">{mode.label}</div>
-                  <div className="text-xs opacity-70 mt-0.5">{mode.description}</div>
-                </button>
-              ))}
+              {MODES.map((mode, i) => {
+                const prevMode = i > 0 ? MODES[i - 1] : null;
+                const showFreqLabel = mode.group === "frequency" && prevMode?.group !== "frequency";
+                return (
+                  <div key={mode.value}>
+                    {showFreqLabel && (
+                      <div className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono mb-2 mt-1 border-t border-border/30 pt-3">Frequency Benchmark</div>
+                    )}
+                    <button
+                      onClick={() => setSelectedMode(mode.value)}
+                      className={`w-full text-left p-3 rounded-md border transition-colors ${
+                        selectedMode === mode.value
+                          ? "border-primary bg-primary/10 text-foreground"
+                          : "border-border/50 hover:border-border hover:bg-secondary/30 text-muted-foreground"
+                      }`}
+                      data-testid={`button-mode-${mode.value}`}
+                    >
+                      <div className="font-medium text-sm">{mode.label}</div>
+                      <div className="text-xs opacity-70 mt-0.5">{mode.description}</div>
+                    </button>
+                  </div>
+                );
+              })}
             </CardContent>
           </Card>
 

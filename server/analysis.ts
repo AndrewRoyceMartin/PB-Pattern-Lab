@@ -322,9 +322,20 @@ export function runWalkForwardValidation(draws: Draw[]): ValidationSummary {
     return { picks, pb: topPb(pbFreqs) };
   });
 
-  const strategies = [randomResult, freqResult, recencyResult, structureResult, compositeResult];
+  const mostDrawnAllTime = scoreStrategy("Most Drawn (All-Time)", (train) => {
+    return buildMostDrawnPick(train, train.length);
+  });
 
-  // Rolling windows
+  const mostDrawnLast50 = scoreStrategy("Most Drawn (Last 50)", (train) => {
+    return buildMostDrawnPick(train, 50);
+  });
+
+  const mostDrawnLast100 = scoreStrategy("Most Drawn (Last 100)", (train) => {
+    return buildMostDrawnPick(train, 100);
+  });
+
+  const strategies = [randomResult, freqResult, recencyResult, structureResult, compositeResult, mostDrawnAllTime, mostDrawnLast50, mostDrawnLast100];
+
   const rollingWindows = computeRollingWindows(draws);
 
   const delta = compositeResult.avgMainMatches - randomResult.avgMainMatches;
@@ -399,6 +410,120 @@ function computeRollingWindows(draws: Draw[]): RollingWindow[] {
   }
 
   return windows;
+}
+
+function buildMostDrawnPick(draws: Draw[], windowSize: number): { picks: number[]; pb: number } {
+  const window = draws.slice(0, Math.min(windowSize, draws.length));
+  if (window.length === 0) return { picks: generateRandomCard(), pb: Math.floor(Math.random() * 20) + 1 };
+
+  const mainCounts: { number: number; count: number; lastSeen: number }[] = [];
+  for (let n = 1; n <= 35; n++) {
+    let count = 0;
+    let lastSeen = window.length;
+    for (let i = 0; i < window.length; i++) {
+      if ((window[i].numbers as number[]).includes(n)) {
+        count++;
+        if (i < lastSeen) lastSeen = i;
+      }
+    }
+    mainCounts.push({ number: n, count, lastSeen });
+  }
+  mainCounts.sort((a, b) => b.count - a.count || a.lastSeen - b.lastSeen || a.number - b.number);
+  const picks = mainCounts.slice(0, 7).map(m => m.number).sort((a, b) => a - b);
+
+  const pbCounts: { number: number; count: number; lastSeen: number }[] = [];
+  for (let n = 1; n <= 20; n++) {
+    let count = 0;
+    let lastSeen = window.length;
+    for (let i = 0; i < window.length; i++) {
+      if (window[i].powerball === n) {
+        count++;
+        if (i < lastSeen) lastSeen = i;
+      }
+    }
+    pbCounts.push({ number: n, count, lastSeen });
+  }
+  pbCounts.sort((a, b) => b.count - a.count || a.lastSeen - b.lastSeen || a.number - b.number);
+  const pb = pbCounts[0]?.number ?? 1;
+
+  return { picks, pb };
+}
+
+function generateMostDrawnCards(draws: Draw[], windowSize: number, count: number): GeneratedPick[] {
+  const window = draws.slice(0, Math.min(windowSize, draws.length));
+  if (window.length === 0) return [];
+
+  const mainCounts: { number: number; count: number; lastSeen: number }[] = [];
+  for (let n = 1; n <= 35; n++) {
+    let count = 0;
+    let lastSeen = window.length;
+    for (let i = 0; i < window.length; i++) {
+      if ((window[i].numbers as number[]).includes(n)) {
+        count++;
+        if (i < lastSeen) lastSeen = i;
+      }
+    }
+    mainCounts.push({ number: n, count, lastSeen });
+  }
+  mainCounts.sort((a, b) => b.count - a.count || a.lastSeen - b.lastSeen || a.number - b.number);
+
+  const pbCounts: { number: number; count: number; lastSeen: number }[] = [];
+  for (let n = 1; n <= 20; n++) {
+    let count = 0;
+    let lastSeen = window.length;
+    for (let i = 0; i < window.length; i++) {
+      if (window[i].powerball === n) {
+        count++;
+        if (i < lastSeen) lastSeen = i;
+      }
+    }
+    pbCounts.push({ number: n, count, lastSeen });
+  }
+  pbCounts.sort((a, b) => b.count - a.count || a.lastSeen - b.lastSeen || a.number - b.number);
+
+  const mainPool = Math.min(18, mainCounts.length);
+  const pbPool = Math.min(10, pbCounts.length);
+  const candidates: GeneratedPick[] = [];
+  const seen = new Set<string>();
+
+  for (let attempt = 0; attempt < count * 30 && candidates.length < count; attempt++) {
+    let card: number[];
+    let pb: number;
+
+    if (attempt === 0) {
+      card = mainCounts.slice(0, 7).map(m => m.number).sort((a, b) => a - b);
+      pb = pbCounts[0]?.number ?? 1;
+    } else {
+      const poolSlice = mainCounts.slice(0, mainPool);
+      const weights = poolSlice.map((m, i) => ({ number: m.number, score: mainPool - i + m.count }));
+      card = weightedSample(weights, 7);
+      const pbIdx = Math.floor(Math.random() * Math.min(pbPool, pbCounts.length));
+      pb = pbCounts[pbIdx]?.number ?? 1;
+    }
+
+    const key = card.join(",") + ":" + pb;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const { score: antiPop, breakdown } = scoreAntiPopularity(card, pb);
+    const topMainSet = new Set(mainCounts.slice(0, 7).map(m => m.number));
+    const overlapCount = card.filter(n => topMainSet.has(n)).length;
+    const drawFit = Math.round((overlapCount / 7) * 100);
+    const finalScore = (drawFit * 60 + antiPop * 40) / 100;
+
+    candidates.push({
+      rank: 0,
+      numbers: card,
+      powerball: pb,
+      drawFit,
+      antiPop: Math.round(antiPop),
+      finalScore: Math.round(finalScore * 10) / 10,
+      antiPopBreakdown: breakdown,
+    });
+  }
+
+  candidates.sort((a, b) => b.finalScore - a.finalScore);
+  return candidates.slice(0, count).map((c, i) => ({ ...c, rank: i + 1 }));
 }
 
 function generateStructureAwareCard(draws: Draw[]): number[] {
@@ -499,6 +624,8 @@ export function scoreAntiPopularity(numbers: number[], powerball: number): { sco
     },
   };
 }
+
+export { generateMostDrawnCards };
 
 export function generateRankedPicks(
   draws: Draw[],

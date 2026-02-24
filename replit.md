@@ -17,8 +17,14 @@ The app follows a monorepo structure with three main directories:
   - Added randomness audit (chi-square + entropy analysis)
   - Standardized all API responses to `{ok, meta, data}` format
   - Added `/api/analysis/audit` endpoint
-  - Generator supports 4 modes: balanced, anti_popular, pattern_only, random_baseline
+  - Generator supports 7 modes: balanced, anti_popular, pattern_only, random_baseline, most_drawn_all_time, most_drawn_last_50, most_drawn_last_100
   - Rebuilt all 5 frontend pages with improved UX
+- **2026-02-24**: Added Most Drawn frequency benchmark strategies:
+  - 3 new strategies (All-Time, Last 50, Last 100) in walk-forward validation
+  - Validation table shows "beats random" flag and delta per strategy
+  - Plain-English Most Drawn summary card on Validation page
+  - Generator supports Most Drawn modes with diverse card generation from frequency-ranked pools
+  - Deterministic tie-breaking (count > recency > number) for reproducible results
 
 ## User Preferences
 
@@ -33,7 +39,7 @@ Preferred communication style: Simple, everyday language.
   - `/ingest` — CSV file upload for importing Powerball draw data
   - `/patterns` — Pattern Lab (frequency analysis, structure features, randomness audit with chi-square/entropy)
   - `/validation` — Walk-forward backtest with verdict classification, strategy comparison, rolling windows, diagnostics
-  - `/generator` — Pick generation with 4 modes (Balanced, Low Split-Risk, Experimental Pattern, Random Baseline), anti-popularity breakdown
+  - `/generator` — Pick generation with 7 modes (Balanced, Low Split-Risk, Experimental Pattern, Most Drawn All-Time/Last 50/Last 100, Random Baseline), anti-popularity breakdown
 - **UI Components**: shadcn/ui (new-york style) built on Radix UI primitives with Tailwind CSS
 - **State Management**: TanStack React Query for server state; local React state for UI
 - **Styling**: Tailwind CSS v4 with CSS variables for theming; dark mode by default for a "lab" aesthetic
@@ -55,8 +61,8 @@ Preferred communication style: Simple, everyday language.
   - `POST /api/generate` — Generate ranked picks with mode selection and configurable weights
 - **Analysis Engine** (`server/analysis.ts`): Three engines:
   - Engine A (Pattern Discovery): frequency, structure, carryover, rolling drift
-  - Engine B (Validation): walk-forward backtest with 5 strategies (Random, Frequency, Recency, Structure-Aware, Composite), rolling windows, verdict classification (no_edge/weak_edge/possible_edge/insufficient_data)
-  - Engine C (Generator): ranked picks with draw-fit scoring, anti-popularity penalties (birthday, sequence, endings, aesthetic, low PB), mode-based generation
+  - Engine B (Validation): walk-forward backtest with 8 strategies (Random, Frequency, Recency, Structure-Aware, Composite, Most Drawn All-Time, Most Drawn Last 50, Most Drawn Last 100), rolling windows, verdict classification (no_edge/weak_edge/possible_edge/insufficient_data), "beats random" flag per strategy
+  - Engine C (Generator): ranked picks with draw-fit scoring, anti-popularity penalties (birthday, sequence, endings, aesthetic, low PB), 7 generation modes including 3 Most Drawn frequency benchmarks
 - **Dev Server**: Vite middleware is integrated into Express for HMR during development
 - **Production Build**: Vite builds the client; esbuild bundles the server into `dist/index.cjs`
 
