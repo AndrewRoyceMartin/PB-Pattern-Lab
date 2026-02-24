@@ -2,15 +2,28 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import multer from "multer";
+import type { ApiResponse, GeneratorMode } from "@shared/schema";
 import {
   computeNumberFrequencies,
-  computeStructureFeatures,
-  computeCarryoverFeatures,
+  computePatternFeatures,
+  runRandomnessAudit,
   runWalkForwardValidation,
-  generatePicks,
+  generateRankedPicks,
 } from "./analysis";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+
+function apiResponse<T>(draws: any[], data: T): ApiResponse<T> {
+  return {
+    ok: true,
+    meta: {
+      drawsUsed: draws.length,
+      modernFormatOnly: true,
+      generatedAt: new Date().toISOString(),
+    },
+    data,
+  };
+}
 
 export async function registerRoutes(
   httpServer: Server,
@@ -20,14 +33,14 @@ export async function registerRoutes(
   app.post("/api/upload", upload.single("file"), async (req, res) => {
     try {
       if (!req.file) {
-        return res.status(400).json({ message: "No file uploaded" });
+        return res.status(400).json({ ok: false, message: "No file uploaded" });
       }
 
       const csvText = req.file.buffer.toString("utf-8");
       const lines = csvText.split(/\r?\n/).filter(line => line.trim());
 
       if (lines.length < 2) {
-        return res.status(400).json({ message: "CSV file appears to be empty" });
+        return res.status(400).json({ ok: false, message: "CSV file appears to be empty" });
       }
 
       const header = lines[0].toLowerCase();
@@ -48,30 +61,33 @@ export async function registerRoutes(
       }
 
       if (drawsToInsert.length === 0) {
-        return res.status(400).json({ message: "No valid draws found in CSV. Check format: expects columns for draw number, date, 7 main numbers, and powerball." });
+        return res.status(400).json({ ok: false, message: "No valid draws found in CSV. Check format: expects columns for draw number, date, 7 main numbers, and powerball." });
       }
 
       const inserted = await storage.insertDraws(drawsToInsert);
 
       res.json({
-        message: "Upload successful",
-        totalRows: rows.length,
-        validDraws: inserted.length,
-        modernDraws: inserted.filter(d => d.isModernFormat).length,
-        latestDate: inserted.length > 0 ? inserted[0].drawDate : null,
+        ok: true,
+        meta: { drawsUsed: inserted.length, modernFormatOnly: false, generatedAt: new Date().toISOString() },
+        data: {
+          totalRows: rows.length,
+          validDraws: inserted.length,
+          modernDraws: inserted.filter(d => d.isModernFormat).length,
+          latestDate: inserted.length > 0 ? inserted[0].drawDate : null,
+        },
       });
     } catch (error: any) {
       console.error("Upload error:", error);
-      res.status(500).json({ message: "Failed to process CSV: " + error.message });
+      res.status(500).json({ ok: false, message: "Failed to process CSV: " + error.message });
     }
   });
 
   app.get("/api/draws", async (_req, res) => {
     try {
-      const allDraws = await storage.getModernDraws();
-      res.json(allDraws);
+      const draws = await storage.getModernDraws();
+      res.json(apiResponse(draws, draws));
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ ok: false, message: error.message });
     }
   });
 
@@ -79,12 +95,14 @@ export async function registerRoutes(
     try {
       const allDraws = await storage.getAllDraws();
       const modernDraws = allDraws.filter(d => d.isModernFormat);
-      const count = allDraws.length;
-      const modernCount = modernDraws.length;
       const latestDate = modernDraws.length > 0 ? modernDraws[0].drawDate : null;
-      res.json({ totalDraws: count, modernDraws: modernCount, latestDate });
+      res.json(apiResponse(allDraws, {
+        totalDraws: allDraws.length,
+        modernDraws: modernDraws.length,
+        latestDate,
+      }));
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ ok: false, message: error.message });
     }
   });
 
@@ -92,23 +110,29 @@ export async function registerRoutes(
     try {
       const draws = await storage.getModernDraws();
       const freqs = computeNumberFrequencies(draws);
-      res.json(freqs);
+      res.json(apiResponse(draws, freqs));
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ ok: false, message: error.message });
     }
   });
 
   app.get("/api/analysis/features", async (_req, res) => {
     try {
       const draws = await storage.getModernDraws();
-      if (draws.length === 0) {
-        return res.json({ structure: [], carryover: [] });
-      }
-      const structure = computeStructureFeatures(draws[0]);
-      const carryover = computeCarryoverFeatures(draws);
-      res.json({ structure, carryover });
+      const features = computePatternFeatures(draws);
+      res.json(apiResponse(draws, features));
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ ok: false, message: error.message });
+    }
+  });
+
+  app.get("/api/analysis/audit", async (_req, res) => {
+    try {
+      const draws = await storage.getModernDraws();
+      const audit = runRandomnessAudit(draws);
+      res.json(apiResponse(draws, audit));
+    } catch (error: any) {
+      res.status(500).json({ ok: false, message: error.message });
     }
   });
 
@@ -116,23 +140,39 @@ export async function registerRoutes(
     try {
       const draws = await storage.getModernDraws();
       const results = runWalkForwardValidation(draws);
-      res.json(results);
+      res.json(apiResponse(draws, results));
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ ok: false, message: error.message });
     }
   });
 
   app.post("/api/generate", async (req, res) => {
     try {
-      const { count = 10, drawFitWeight = 60, antiPopWeight = 40 } = req.body || {};
+      const { count = 10, mode = "balanced" } = req.body || {};
+
+      let drawFitWeight: number;
+      let antiPopWeight: number;
+
+      switch (mode as GeneratorMode) {
+        case "anti_popular":
+          drawFitWeight = 20; antiPopWeight = 80; break;
+        case "pattern_only":
+          drawFitWeight = 100; antiPopWeight = 0; break;
+        case "random_baseline":
+          drawFitWeight = 0; antiPopWeight = 0; break;
+        default:
+          drawFitWeight = req.body?.drawFitWeight ?? 60;
+          antiPopWeight = req.body?.antiPopWeight ?? 40;
+      }
+
       const draws = await storage.getModernDraws();
       if (draws.length === 0) {
-        return res.status(400).json({ message: "No draws available. Upload data first." });
+        return res.status(400).json({ ok: false, message: "No draws available. Upload data first." });
       }
-      const picks = generatePicks(draws, count, drawFitWeight, antiPopWeight);
-      res.json(picks);
+      const picks = generateRankedPicks(draws, count, drawFitWeight, antiPopWeight);
+      res.json(apiResponse(draws, picks));
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ ok: false, message: error.message });
     }
   });
 

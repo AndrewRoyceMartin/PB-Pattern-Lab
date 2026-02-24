@@ -1,18 +1,22 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ActivitySquare, Fingerprint, Clock, TrendingUp, Search } from "lucide-react";
+import { ActivitySquare, Fingerprint, Clock, TrendingUp, Search, ShieldCheck } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
+import { fetchApi } from "@/lib/api";
+import type { NumberFrequency, AuditSummary } from "@shared/schema";
 
 export default function PatternLab() {
-  const { data: stats } = useQuery({ queryKey: ["/api/stats"], queryFn: () => fetch("/api/stats").then(r => r.json()) });
-  const { data: freqs } = useQuery({ queryKey: ["/api/analysis/frequencies"], queryFn: () => fetch("/api/analysis/frequencies").then(r => r.json()), enabled: !!stats?.modernDraws });
-  const { data: features } = useQuery({ queryKey: ["/api/analysis/features"], queryFn: () => fetch("/api/analysis/features").then(r => r.json()), enabled: !!stats?.modernDraws });
+  const { data: stats } = useQuery({ queryKey: ["/api/stats"], queryFn: () => fetchApi("/api/stats") });
+  const { data: freqs } = useQuery<NumberFrequency[]>({ queryKey: ["/api/analysis/frequencies"], queryFn: () => fetchApi("/api/analysis/frequencies"), enabled: !!stats?.modernDraws });
+  const { data: features } = useQuery({ queryKey: ["/api/analysis/features"], queryFn: () => fetchApi("/api/analysis/features"), enabled: !!stats?.modernDraws });
+  const { data: audit } = useQuery<AuditSummary>({ queryKey: ["/api/analysis/audit"], queryFn: () => fetchApi("/api/analysis/audit"), enabled: !!stats?.modernDraws });
 
   const hasData = stats?.modernDraws > 0;
   const allFeatures = [...(features?.structure || []), ...(features?.carryover || [])];
 
-  const hotNumbers = freqs ? [...freqs].sort((a: any, b: any) => b.last50Freq - a.last50Freq).slice(0, 3).map((f: any) => f.number).join(", ") : "--";
-  const maxDrift = freqs ? Math.max(...freqs.map((f: any) => Math.abs(f.rollingTrend))) : 0;
+  const hotNumbers = freqs ? [...freqs].sort((a, b) => b.last50Freq - a.last50Freq).slice(0, 3).map(f => f.number).join(", ") : "--";
+  const coldNumbers = freqs ? [...freqs].sort((a, b) => b.drawsSinceSeen - a.drawsSinceSeen).slice(0, 3).map(f => f.number).join(", ") : "--";
+  const maxDrift = freqs ? Math.max(...freqs.map(f => Math.abs(f.rollingTrend))) : 0;
   const hasCarryover = (features?.carryover || []).some((f: any) => f.value > 0);
 
   return (
@@ -21,7 +25,7 @@ export default function PatternLab() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight" data-testid="text-pattern-title">Pattern Lab</h1>
           <p className="text-muted-foreground mt-2 font-mono text-sm">
-            Feature extraction and randomness auditing.
+            Feature extraction, frequency analysis, and randomness audit.
           </p>
         </div>
         <div className={`flex gap-2 ${!hasData ? "opacity-50" : ""}`}>
@@ -39,34 +43,32 @@ export default function PatternLab() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-mono font-bold" data-testid="text-hot-numbers">{hasData ? hotNumbers : "--"}</div>
-            <p className="text-xs text-muted-foreground mt-1">{hasData ? "Last 50 draws" : "Awaiting data"}</p>
+            <div className="text-xl font-mono font-bold" data-testid="text-hot-numbers">{hasData ? hotNumbers : "--"}</div>
+            <p className="text-xs text-muted-foreground mt-1">{hasData ? "Highest freq (L50)" : "Awaiting data"}</p>
           </CardContent>
         </Card>
         <Card className={`border-border ${!hasData ? "opacity-50" : ""}`}>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground flex items-center">
-              <Clock className="w-4 h-4 mr-2" /> Recency Bias
+              <Clock className="w-4 h-4 mr-2" /> Cold Numbers
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className={`text-2xl font-mono font-bold ${hasData && hasCarryover ? "text-orange-500" : "text-muted-foreground"}`}>
+            <div className="text-xl font-mono font-bold text-blue-400">{hasData ? coldNumbers : "--"}</div>
+            <p className="text-xs text-muted-foreground mt-1">{hasData ? "Most overdue" : "Awaiting data"}</p>
+          </CardContent>
+        </Card>
+        <Card className={`border-border ${!hasData ? "opacity-50" : ""}`}>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center">
+              <ActivitySquare className="w-4 h-4 mr-2" /> Carryover
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className={`text-xl font-mono font-bold ${hasData && hasCarryover ? "text-orange-500" : "text-muted-foreground"}`}>
               {hasData ? (hasCarryover ? "Detected" : "None") : "--"}
             </div>
-            <p className="text-xs text-muted-foreground mt-1">{hasData ? "Carryover analysis" : "Awaiting data"}</p>
-          </CardContent>
-        </Card>
-        <Card className={`border-border ${!hasData ? "opacity-50" : ""}`}>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center">
-              <ActivitySquare className="w-4 h-4 mr-2" /> Structure Fit
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-mono font-bold" data-testid="text-structure-fit">
-              {hasData ? "Normal" : "--"}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">{hasData ? "Sum/Spread expected" : "Awaiting data"}</p>
+            <p className="text-xs text-muted-foreground mt-1">{hasData ? "From previous draws" : "Awaiting data"}</p>
           </CardContent>
         </Card>
         <Card className={`border-border ${!hasData ? "opacity-50" : ""}`}>
@@ -76,18 +78,57 @@ export default function PatternLab() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className={`text-2xl font-mono font-bold ${hasData ? (maxDrift > 3 ? "text-orange-500" : "text-green-500") : "text-muted-foreground"}`}>
+            <div className={`text-xl font-mono font-bold ${hasData ? (maxDrift > 3 ? "text-orange-500" : "text-green-500") : "text-muted-foreground"}`}>
               {hasData ? (maxDrift > 3 ? "Drifting" : "Stable") : "--"}
             </div>
-            <p className="text-xs text-muted-foreground mt-1">{hasData ? `Max drift: ${maxDrift}` : "Awaiting data"}</p>
+            <p className="text-xs text-muted-foreground mt-1">{hasData ? `Max: ${maxDrift}` : "Awaiting data"}</p>
           </CardContent>
         </Card>
       </div>
 
-      <Card className="border-border mt-6">
+      {/* Randomness Audit */}
+      {hasData && audit && (
+        <Card className={`border-border ${audit.verdict === "pass" ? "border-green-500/30" : audit.verdict === "marginal" ? "border-yellow-500/30" : "border-red-500/30"}`}>
+          <CardHeader>
+            <CardTitle className="flex items-center">
+              <ShieldCheck className="w-5 h-5 mr-2" /> Randomness Audit
+            </CardTitle>
+            <CardDescription>Chi-square frequency test and entropy analysis</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+              <div className="space-y-1">
+                <span className="text-xs text-muted-foreground uppercase tracking-wider">Verdict</span>
+                <div className={`text-xl font-mono font-bold ${audit.verdict === "pass" ? "text-green-500" : audit.verdict === "marginal" ? "text-yellow-500" : "text-red-500"}`}>
+                  {audit.verdict.toUpperCase()}
+                </div>
+              </div>
+              <div className="space-y-1">
+                <span className="text-xs text-muted-foreground uppercase tracking-wider font-mono">Chi-Square</span>
+                <div className="text-xl font-mono font-bold">{audit.chiSquareStat}</div>
+                <span className="text-xs text-muted-foreground font-mono">p={audit.chiSquarePValue}</span>
+              </div>
+              <div className="space-y-1">
+                <span className="text-xs text-muted-foreground uppercase tracking-wider font-mono">Entropy</span>
+                <div className="text-xl font-mono font-bold">{audit.entropyScore}</div>
+                <span className="text-xs text-muted-foreground font-mono">max={audit.maxEntropy}</span>
+              </div>
+              <div className="space-y-1">
+                <span className="text-xs text-muted-foreground uppercase tracking-wider font-mono">Entropy Ratio</span>
+                <div className="text-xl font-mono font-bold">{(audit.entropyRatio * 100).toFixed(1)}%</div>
+                <span className="text-xs text-muted-foreground font-mono">of maximum</span>
+              </div>
+            </div>
+            <p className="text-sm text-muted-foreground bg-secondary/30 p-3 rounded-md border border-border/50">{audit.details}</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Feature Table */}
+      <Card className="border-border">
         <CardHeader>
           <CardTitle>Extracted Features (Latest Draw)</CardTitle>
-          <CardDescription>Live telemetry from the most recent dataset entry</CardDescription>
+          <CardDescription>Structure and sequence telemetry</CardDescription>
         </CardHeader>
         <CardContent>
           {allFeatures.length > 0 ? (
@@ -95,7 +136,7 @@ export default function PatternLab() {
               <table className="w-full text-sm font-mono text-left">
                 <thead className="bg-secondary/50">
                   <tr>
-                    <th className="p-3 text-muted-foreground font-medium">Feature Key</th>
+                    <th className="p-3 text-muted-foreground font-medium">Feature</th>
                     <th className="p-3 text-muted-foreground font-medium">Value</th>
                     <th className="p-3 text-muted-foreground font-medium">Class</th>
                   </tr>
@@ -123,17 +164,18 @@ export default function PatternLab() {
             <div className="flex flex-col items-center justify-center py-16 text-muted-foreground border border-dashed border-border/50 rounded-lg bg-secondary/10">
               <Search className="w-10 h-10 mb-3 opacity-30" />
               <p className="font-mono text-sm">No patterns discovered.</p>
-              <p className="text-xs opacity-70 mt-1">Please upload a dataset to begin feature extraction.</p>
+              <p className="text-xs opacity-70 mt-1">Upload a dataset to begin.</p>
             </div>
           )}
         </CardContent>
       </Card>
 
+      {/* Frequency Table */}
       {hasData && freqs && (
         <Card className="border-border">
           <CardHeader>
             <CardTitle>Number Frequencies (1-35)</CardTitle>
-            <CardDescription>Frequency analysis across different windows</CardDescription>
+            <CardDescription>Frequency across different rolling windows</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="rounded-md border border-border/50 overflow-hidden overflow-x-auto">
@@ -150,7 +192,7 @@ export default function PatternLab() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/50">
-                  {freqs.map((f: any) => (
+                  {freqs.map((f) => (
                     <tr key={f.number} className="hover:bg-secondary/20 transition-colors">
                       <td className="p-2 font-bold text-primary">{f.number}</td>
                       <td className="p-2">{f.totalFreq}</td>

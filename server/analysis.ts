@@ -1,36 +1,19 @@
-import { type Draw } from "@shared/schema";
+import {
+  type Draw,
+  type NumberFrequency,
+  type PatternFeatureRow,
+  type AuditSummary,
+  type StrategyResult,
+  type ValidationSummary,
+  type ValidationVerdict,
+  type RollingWindow,
+  type GeneratedPick,
+  type AntiPopularityBreakdown,
+} from "@shared/schema";
 
-export interface NumberFrequency {
-  number: number;
-  totalFreq: number;
-  last10Freq: number;
-  last25Freq: number;
-  last50Freq: number;
-  drawsSinceSeen: number;
-  rollingTrend: number;
-}
-
-export interface StructureFeature {
-  feature: string;
-  value: number | string;
-  type: "structure" | "recency" | "sequence";
-}
-
-export interface ValidationResult {
-  strategy: string;
-  avgMainMatches: number;
-  powerballHitRate: string;
-  top10Overlap: string;
-}
-
-export interface GeneratedPick {
-  rank: number;
-  numbers: number[];
-  powerball: number;
-  drawFit: number;
-  antiPop: number;
-  finalScore: number;
-}
+// ═══════════════════════════════════════════
+// Engine A: Pattern Discovery
+// ═══════════════════════════════════════════
 
 export function computeNumberFrequencies(draws: Draw[]): NumberFrequency[] {
   if (draws.length === 0) return [];
@@ -69,7 +52,14 @@ export function computeNumberFrequencies(draws: Draw[]): NumberFrequency[] {
   return frequencies;
 }
 
-export function computeStructureFeatures(draw: Draw): StructureFeature[] {
+export function computePatternFeatures(draws: Draw[]): { structure: PatternFeatureRow[]; carryover: PatternFeatureRow[] } {
+  if (draws.length === 0) return { structure: [], carryover: [] };
+  const structure = computeStructureFeatures(draws[0]);
+  const carryover = computeCarryoverFeatures(draws);
+  return { structure, carryover };
+}
+
+function computeStructureFeatures(draw: Draw): PatternFeatureRow[] {
   const nums = draw.numbers as number[];
   const sorted = [...nums].sort((a, b) => a - b);
   const oddCount = nums.filter(n => n % 2 !== 0).length;
@@ -112,12 +102,12 @@ export function computeStructureFeatures(draw: Draw): StructureFeature[] {
   ];
 }
 
-export function computeCarryoverFeatures(draws: Draw[]): StructureFeature[] {
+function computeCarryoverFeatures(draws: Draw[]): PatternFeatureRow[] {
   if (draws.length < 2) return [];
   const current = draws[0].numbers as number[];
   const prev1 = draws[1].numbers as number[];
   const carryover1 = current.filter(n => prev1.includes(n)).length;
-  const features: StructureFeature[] = [
+  const features: PatternFeatureRow[] = [
     { feature: "carryover_from_prev", value: carryover1, type: "sequence" },
   ];
   if (draws.length >= 4) {
@@ -131,77 +121,320 @@ export function computeCarryoverFeatures(draws: Draw[]): StructureFeature[] {
   return features;
 }
 
-export function runWalkForwardValidation(draws: Draw[]): ValidationResult[] {
+// ═══════════════════════════════════════════
+// Randomness Audit
+// ═══════════════════════════════════════════
+
+export function runRandomnessAudit(draws: Draw[]): AuditSummary {
+  if (draws.length < 20) {
+    return {
+      chiSquareStat: 0, chiSquarePValue: 1, entropyScore: 0, maxEntropy: 0,
+      entropyRatio: 0, verdict: "fail", details: "Insufficient data for audit (need 20+ draws)."
+    };
+  }
+
+  const observed: number[] = new Array(35).fill(0);
+  for (const d of draws) {
+    for (const n of d.numbers as number[]) {
+      observed[n - 1]++;
+    }
+  }
+  const totalBalls = draws.length * 7;
+  const expected = totalBalls / 35;
+
+  let chiSquare = 0;
+  for (let i = 0; i < 35; i++) {
+    chiSquare += Math.pow(observed[i] - expected, 2) / expected;
+  }
+
+  const df = 34;
+  const pValue = 1 - chiSquaredCDF(chiSquare, df);
+
+  const probs = observed.map(o => o / totalBalls);
+  let entropy = 0;
+  for (const p of probs) {
+    if (p > 0) entropy -= p * Math.log2(p);
+  }
+  const maxEntropy = Math.log2(35);
+  const entropyRatio = entropy / maxEntropy;
+
+  let verdict: "pass" | "marginal" | "fail";
+  let details: string;
+
+  if (pValue > 0.05 && entropyRatio > 0.95) {
+    verdict = "pass";
+    details = "Number distribution appears consistent with random draws. No significant deviations detected.";
+  } else if (pValue > 0.01 && entropyRatio > 0.90) {
+    verdict = "marginal";
+    details = "Minor deviations from uniform distribution detected. Could be natural variance or a weak signal worth monitoring.";
+  } else {
+    verdict = "fail";
+    details = "Significant deviation from uniform distribution. This may indicate structural patterns or data quality issues.";
+  }
+
+  return {
+    chiSquareStat: Number(chiSquare.toFixed(2)),
+    chiSquarePValue: Number(pValue.toFixed(4)),
+    entropyScore: Number(entropy.toFixed(4)),
+    maxEntropy: Number(maxEntropy.toFixed(4)),
+    entropyRatio: Number(entropyRatio.toFixed(4)),
+    verdict,
+    details,
+  };
+}
+
+function chiSquaredCDF(x: number, k: number): number {
+  if (x <= 0) return 0;
+  return regularizedGammaP(k / 2, x / 2);
+}
+
+function regularizedGammaP(a: number, x: number): number {
+  if (x <= 0) return 0;
+  if (x < a + 1) {
+    let sum = 1 / a;
+    let term = 1 / a;
+    for (let n = 1; n < 200; n++) {
+      term *= x / (a + n);
+      sum += term;
+      if (Math.abs(term) < 1e-10) break;
+    }
+    return sum * Math.exp(-x + a * Math.log(x) - lnGamma(a));
+  } else {
+    let f = 1;
+    let c = 1;
+    let d = 1 / (x + 1 - a);
+    let h = d;
+    for (let i = 1; i < 200; i++) {
+      const an = -i * (i - a);
+      const bn = x + 2 * i + 1 - a;
+      d = bn + an * d;
+      if (Math.abs(d) < 1e-30) d = 1e-30;
+      c = bn + an / c;
+      if (Math.abs(c) < 1e-30) c = 1e-30;
+      d = 1 / d;
+      const delta = d * c;
+      h *= delta;
+      if (Math.abs(delta - 1) < 1e-10) break;
+    }
+    return 1 - h * Math.exp(-x + a * Math.log(x) - lnGamma(a));
+  }
+}
+
+function lnGamma(z: number): number {
+  const c = [76.18009172947146, -86.50532032941677, 24.01409824083091,
+    -1.231739572450155, 0.1208650973866179e-2, -0.5395239384953e-5];
+  let x = z;
+  let y = z;
+  let tmp = x + 5.5;
+  tmp -= (x + 0.5) * Math.log(tmp);
+  let ser = 1.000000000190015;
+  for (let j = 0; j < 6; j++) {
+    y += 1;
+    ser += c[j] / y;
+  }
+  return -tmp + Math.log(2.5066282746310005 * ser / x);
+}
+
+// ═══════════════════════════════════════════
+// Engine B: Validation
+// ═══════════════════════════════════════════
+
+export function runWalkForwardValidation(draws: Draw[]): ValidationSummary {
   if (draws.length < 50) {
-    return [
-      { strategy: "Random", avgMainMatches: 0, powerballHitRate: "0%", top10Overlap: "0%" },
-      { strategy: "Frequency Only", avgMainMatches: 0, powerballHitRate: "0%", top10Overlap: "0%" },
-      { strategy: "Recency Only", avgMainMatches: 0, powerballHitRate: "0%", top10Overlap: "0%" },
-      { strategy: "Composite Model", avgMainMatches: 0, powerballHitRate: "0%", top10Overlap: "0%" },
-    ];
+    return {
+      verdict: "insufficient_data",
+      verdictExplanation: `Only ${draws.length} modern draws available. Need at least 50 for meaningful walk-forward validation. Upload more data or check that your CSV contains modern format (7+1) draws.`,
+      byStrategy: [],
+      rollingWindows: [],
+      diagnostics: {
+        totalDrawsUsed: draws.length,
+        testSetSize: 0,
+        trainSetSize: 0,
+        modernFormatOnly: true,
+        compositeVsRandomDelta: 0,
+      },
+    };
   }
 
   const testSize = Math.min(50, Math.floor(draws.length * 0.2));
   const testDraws = draws.slice(0, testSize);
   const trainDraws = draws.slice(testSize);
 
-  function scoreStrategy(strategy: string): { avgMain: number; pbHits: number } {
+  function scoreStrategy(strategyName: string, strategyFn: (train: Draw[]) => { picks: number[]; pb: number }): StrategyResult {
     let totalMain = 0;
+    let bestMain = 0;
     let pbHits = 0;
 
     for (const testDraw of testDraws) {
       const actual = testDraw.numbers as number[];
       const actualPB = testDraw.powerball;
-      let picks: number[];
-      let pickPB: number;
-
-      if (strategy === "random") {
-        picks = generateRandomCard();
-        pickPB = Math.floor(Math.random() * 20) + 1;
-      } else if (strategy === "frequency") {
-        const freqs = computeNumberFrequencies(trainDraws);
-        const sorted = [...freqs].sort((a, b) => b.totalFreq - a.totalFreq);
-        picks = sorted.slice(0, 7).map(f => f.number).sort((a, b) => a - b);
-        const pbFreqs: Record<number, number> = {};
-        trainDraws.forEach(d => { pbFreqs[d.powerball] = (pbFreqs[d.powerball] || 0) + 1; });
-        pickPB = Object.entries(pbFreqs).sort(([, a], [, b]) => b - a)[0] ? Number(Object.entries(pbFreqs).sort(([, a], [, b]) => b - a)[0][0]) : 1;
-      } else if (strategy === "recency") {
-        const freqs = computeNumberFrequencies(trainDraws);
-        const sorted = [...freqs].sort((a, b) => a.drawsSinceSeen - b.drawsSinceSeen);
-        picks = sorted.slice(0, 7).map(f => f.number).sort((a, b) => a - b);
-        pickPB = trainDraws[0]?.powerball || 1;
-      } else {
-        const freqs = computeNumberFrequencies(trainDraws);
-        const scored = freqs.map(f => ({
-          number: f.number,
-          score: f.last25Freq * 2 + f.last10Freq * 3 - f.drawsSinceSeen + f.rollingTrend * 2,
-        }));
-        const sorted = [...scored].sort((a, b) => b.score - a.score);
-        picks = sorted.slice(0, 7).map(f => f.number).sort((a, b) => a - b);
-        const pbFreqs: Record<number, number> = {};
-        trainDraws.slice(0, 25).forEach(d => { pbFreqs[d.powerball] = (pbFreqs[d.powerball] || 0) + 1; });
-        pickPB = Object.entries(pbFreqs).sort(([, a], [, b]) => b - a)[0] ? Number(Object.entries(pbFreqs).sort(([, a], [, b]) => b - a)[0][0]) : 1;
-      }
-
+      const { picks, pb } = strategyFn(trainDraws);
       const mainMatches = picks.filter(n => actual.includes(n)).length;
       totalMain += mainMatches;
-      if (pickPB === actualPB) pbHits++;
+      bestMain = Math.max(bestMain, mainMatches);
+      if (pb === actualPB) pbHits++;
     }
 
-    return { avgMain: totalMain / testDraws.length, pbHits };
+    return {
+      strategy: strategyName,
+      avgMainMatches: Number((totalMain / testDraws.length).toFixed(2)),
+      bestMainMatches: bestMain,
+      powerballHitRate: Number(((pbHits / testSize) * 100).toFixed(1)),
+      powerballHits: pbHits,
+      testDraws: testSize,
+    };
   }
 
-  const random = scoreStrategy("random");
-  const freq = scoreStrategy("frequency");
-  const recency = scoreStrategy("recency");
-  const composite = scoreStrategy("composite");
+  const randomResult = scoreStrategy("Random", () => ({
+    picks: generateRandomCard(),
+    pb: Math.floor(Math.random() * 20) + 1,
+  }));
 
-  return [
-    { strategy: "Random", avgMainMatches: Number(random.avgMain.toFixed(2)), powerballHitRate: `${((random.pbHits / testSize) * 100).toFixed(1)}%`, top10Overlap: "0%" },
-    { strategy: "Frequency Only", avgMainMatches: Number(freq.avgMain.toFixed(2)), powerballHitRate: `${((freq.pbHits / testSize) * 100).toFixed(1)}%`, top10Overlap: "12%" },
-    { strategy: "Recency Only", avgMainMatches: Number(recency.avgMain.toFixed(2)), powerballHitRate: `${((recency.pbHits / testSize) * 100).toFixed(1)}%`, top10Overlap: "8%" },
-    { strategy: "Composite Model", avgMainMatches: Number(composite.avgMain.toFixed(2)), powerballHitRate: `${((composite.pbHits / testSize) * 100).toFixed(1)}%`, top10Overlap: "100%" },
-  ];
+  const freqResult = scoreStrategy("Frequency Only", (train) => {
+    const freqs = computeNumberFrequencies(train);
+    const sorted = [...freqs].sort((a, b) => b.totalFreq - a.totalFreq);
+    const picks = sorted.slice(0, 7).map(f => f.number).sort((a, b) => a - b);
+    const pbFreqs = getPbFreqs(train);
+    return { picks, pb: topPb(pbFreqs) };
+  });
+
+  const recencyResult = scoreStrategy("Recency Only", (train) => {
+    const freqs = computeNumberFrequencies(train);
+    const sorted = [...freqs].sort((a, b) => a.drawsSinceSeen - b.drawsSinceSeen);
+    const picks = sorted.slice(0, 7).map(f => f.number).sort((a, b) => a - b);
+    return { picks, pb: train[0]?.powerball || 1 };
+  });
+
+  const structureResult = scoreStrategy("Structure-Aware Random", (train) => {
+    const card = generateStructureAwareCard(train);
+    return { picks: card, pb: Math.floor(Math.random() * 20) + 1 };
+  });
+
+  const compositeResult = scoreStrategy("Composite Model", (train) => {
+    const freqs = computeNumberFrequencies(train);
+    const scored = freqs.map(f => ({
+      number: f.number,
+      score: f.last25Freq * 2 + f.last10Freq * 3 - f.drawsSinceSeen * 0.5 + f.rollingTrend * 2,
+    }));
+    const sorted = [...scored].sort((a, b) => b.score - a.score);
+    const picks = sorted.slice(0, 7).map(f => f.number).sort((a, b) => a - b);
+    const pbFreqs = getPbFreqs(train.slice(0, 25));
+    return { picks, pb: topPb(pbFreqs) };
+  });
+
+  const strategies = [randomResult, freqResult, recencyResult, structureResult, compositeResult];
+
+  // Rolling windows
+  const rollingWindows = computeRollingWindows(draws);
+
+  const delta = compositeResult.avgMainMatches - randomResult.avgMainMatches;
+  let verdict: ValidationVerdict;
+  let verdictExplanation: string;
+
+  if (delta > 0.5) {
+    verdict = "possible_edge";
+    verdictExplanation = `The composite model averages ${compositeResult.avgMainMatches} main matches per draw vs ${randomResult.avgMainMatches} for random — a delta of +${delta.toFixed(2)}. This suggests a possible statistical edge, though it should be monitored over time for stability.`;
+  } else if (delta > 0.15) {
+    verdict = "weak_edge";
+    verdictExplanation = `The composite model averages ${compositeResult.avgMainMatches} main matches per draw vs ${randomResult.avgMainMatches} for random — a delta of +${delta.toFixed(2)}. This is a weak signal that may not persist. The anti-popularity engine remains your most practical advantage.`;
+  } else {
+    verdict = "no_edge";
+    verdictExplanation = `The composite model averages ${compositeResult.avgMainMatches} main matches per draw vs ${randomResult.avgMainMatches} for random — a delta of ${delta >= 0 ? '+' : ''}${delta.toFixed(2)}. No meaningful predictive edge detected. This is expected — lottery draws are designed to be random. The anti-popularity engine is where the real value lies: reducing split-risk if you do win.`;
+  }
+
+  return {
+    verdict,
+    verdictExplanation,
+    byStrategy: strategies,
+    rollingWindows,
+    diagnostics: {
+      totalDrawsUsed: draws.length,
+      testSetSize: testSize,
+      trainSetSize: trainDraws.length,
+      modernFormatOnly: true,
+      compositeVsRandomDelta: Number(delta.toFixed(2)),
+    },
+  };
+}
+
+function computeRollingWindows(draws: Draw[]): RollingWindow[] {
+  const windowSize = 25;
+  const windows: RollingWindow[] = [];
+  if (draws.length < windowSize + 10) return windows;
+
+  for (let start = 0; start + windowSize <= Math.min(draws.length, 200); start += windowSize) {
+    const testSlice = draws.slice(start, start + 5);
+    const trainSlice = draws.slice(start + 5, start + windowSize);
+    if (trainSlice.length < 10) break;
+
+    let compositeTotal = 0;
+    let randomTotal = 0;
+
+    for (const testDraw of testSlice) {
+      const actual = testDraw.numbers as number[];
+
+      const freqs = computeNumberFrequencies(trainSlice);
+      const scored = freqs.map(f => ({
+        number: f.number,
+        score: f.last25Freq * 2 + f.last10Freq * 3 - f.drawsSinceSeen * 0.5 + f.rollingTrend * 2,
+      }));
+      const sorted = [...scored].sort((a, b) => b.score - a.score);
+      const compositePicks = sorted.slice(0, 7).map(f => f.number);
+      compositeTotal += compositePicks.filter(n => actual.includes(n)).length;
+
+      const randomPicks = generateRandomCard();
+      randomTotal += randomPicks.filter(n => actual.includes(n)).length;
+    }
+
+    const compositeAvg = compositeTotal / testSlice.length;
+    const randomAvg = randomTotal / testSlice.length;
+
+    windows.push({
+      windowStart: start,
+      windowEnd: start + windowSize,
+      compositeAvg: Number(compositeAvg.toFixed(2)),
+      randomAvg: Number(randomAvg.toFixed(2)),
+      delta: Number((compositeAvg - randomAvg).toFixed(2)),
+    });
+  }
+
+  return windows;
+}
+
+function generateStructureAwareCard(draws: Draw[]): number[] {
+  if (draws.length < 5) return generateRandomCard();
+
+  let avgOdd = 0;
+  let avgSum = 0;
+  const sampleSize = Math.min(draws.length, 50);
+  for (let i = 0; i < sampleSize; i++) {
+    const nums = draws[i].numbers as number[];
+    avgOdd += nums.filter(n => n % 2 !== 0).length;
+    avgSum += nums.reduce((a, b) => a + b, 0);
+  }
+  avgOdd = Math.round(avgOdd / sampleSize);
+  avgSum = Math.round(avgSum / sampleSize);
+
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const card = generateRandomCard();
+    const odd = card.filter(n => n % 2 !== 0).length;
+    const sum = card.reduce((a, b) => a + b, 0);
+    if (Math.abs(odd - avgOdd) <= 1 && Math.abs(sum - avgSum) <= 20) {
+      return card;
+    }
+  }
+  return generateRandomCard();
+}
+
+function getPbFreqs(draws: Draw[]): Record<number, number> {
+  const freqs: Record<number, number> = {};
+  draws.forEach(d => { freqs[d.powerball] = (freqs[d.powerball] || 0) + 1; });
+  return freqs;
+}
+
+function topPb(freqs: Record<number, number>): number {
+  const entries = Object.entries(freqs).sort(([, a], [, b]) => b - a);
+  return entries.length > 0 ? Number(entries[0][0]) : 1;
 }
 
 function generateRandomCard(): number[] {
@@ -214,12 +447,21 @@ function generateRandomCard(): number[] {
   return picked.sort((a, b) => a - b);
 }
 
-export function computeAntiPopularityScore(numbers: number[], powerball: number): number {
-  let score = 100;
+// ═══════════════════════════════════════════
+// Engine C: Pick Generator
+// ═══════════════════════════════════════════
+
+export function scoreAntiPopularity(numbers: number[], powerball: number): { score: number; breakdown: AntiPopularityBreakdown } {
+  let birthdayPenalty = 0;
+  let sequencePenalty = 0;
+  let repeatedEndingPenalty = 0;
+  let aestheticPenalty = 0;
+  let lowPowerballPenalty = 0;
 
   const birthdayCount = numbers.filter(n => n <= 31).length;
-  if (birthdayCount >= 5) score -= 20;
-  else if (birthdayCount >= 4) score -= 10;
+  if (birthdayCount >= 6) birthdayPenalty = 25;
+  else if (birthdayCount >= 5) birthdayPenalty = 20;
+  else if (birthdayCount >= 4) birthdayPenalty = 10;
 
   const sorted = [...numbers].sort((a, b) => a - b);
   let maxConsecutive = 1;
@@ -228,23 +470,37 @@ export function computeAntiPopularityScore(numbers: number[], powerball: number)
     if (sorted[i] - sorted[i - 1] === 1) { currentRun++; maxConsecutive = Math.max(maxConsecutive, currentRun); }
     else currentRun = 1;
   }
-  if (maxConsecutive >= 3) score -= 15;
+  if (maxConsecutive >= 4) sequencePenalty = 25;
+  else if (maxConsecutive >= 3) sequencePenalty = 15;
 
   const endings = numbers.map(n => n % 10);
   const endingCounts: Record<number, number> = {};
   endings.forEach(e => { endingCounts[e] = (endingCounts[e] || 0) + 1; });
   const maxEnding = Math.max(...Object.values(endingCounts));
-  if (maxEnding >= 3) score -= 10;
+  if (maxEnding >= 4) repeatedEndingPenalty = 15;
+  else if (maxEnding >= 3) repeatedEndingPenalty = 10;
 
   const isAesthetic = sorted.every((n, i) => i === 0 || sorted[i] - sorted[i - 1] === sorted[1] - sorted[0]);
-  if (isAesthetic && sorted.length > 2) score -= 25;
+  if (isAesthetic && sorted.length > 2) aestheticPenalty = 25;
 
-  if (powerball <= 7) score -= 5;
+  if (powerball <= 7) lowPowerballPenalty = 5;
 
-  return Math.max(0, Math.min(100, score));
+  const totalPenalty = birthdayPenalty + sequencePenalty + repeatedEndingPenalty + aestheticPenalty + lowPowerballPenalty;
+  const score = Math.max(0, Math.min(100, 100 - totalPenalty));
+
+  return {
+    score,
+    breakdown: {
+      birthdayPenalty,
+      sequencePenalty,
+      repeatedEndingPenalty,
+      aestheticPenalty,
+      lowPowerballPenalty,
+    },
+  };
 }
 
-export function generatePicks(
+export function generateRankedPicks(
   draws: Draw[],
   count: number = 10,
   drawFitWeight: number = 60,
@@ -258,23 +514,25 @@ export function generatePicks(
     score: f.last25Freq * 2 + f.last10Freq * 3 - f.drawsSinceSeen * 0.5 + f.rollingTrend * 2,
   }));
 
-  const pbFreqs: Record<number, number> = {};
-  draws.slice(0, 50).forEach(d => { pbFreqs[d.powerball] = (pbFreqs[d.powerball] || 0) + 1; });
+  const pbFreqs = getPbFreqs(draws.slice(0, 50));
 
   const candidates: GeneratedPick[] = [];
   const seen = new Set<string>();
 
-  for (let attempt = 0; attempt < count * 20 && candidates.length < count; attempt++) {
+  for (let attempt = 0; attempt < count * 30 && candidates.length < count; attempt++) {
     let card: number[];
     let pb: number;
 
-    if (attempt % 3 === 0) {
+    if (attempt % 4 === 0) {
       card = weightedSample(scored, 7);
       const pbEntries = Object.entries(pbFreqs).sort(([, a], [, b]) => b - a);
       pb = pbEntries.length > 0 ? Number(pbEntries[Math.floor(Math.random() * Math.min(5, pbEntries.length))][0]) : Math.floor(Math.random() * 20) + 1;
-    } else if (attempt % 3 === 1) {
+    } else if (attempt % 4 === 1) {
       const topNumbers = [...scored].sort((a, b) => b.score - a.score).slice(0, 15);
       card = weightedSample(topNumbers, 7);
+      pb = Math.floor(Math.random() * 20) + 1;
+    } else if (attempt % 4 === 2) {
+      card = generateStructureAwareCard(draws);
       pb = Math.floor(Math.random() * 20) + 1;
     } else {
       card = generateRandomCard();
@@ -286,7 +544,7 @@ export function generatePicks(
     seen.add(key);
 
     const drawFit = computeDrawFitScore(card, scored);
-    const antiPop = computeAntiPopularityScore(card, pb);
+    const { score: antiPop, breakdown } = scoreAntiPopularity(card, pb);
     const finalScore = (drawFit * drawFitWeight + antiPop * antiPopWeight) / 100;
 
     candidates.push({
@@ -296,6 +554,7 @@ export function generatePicks(
       drawFit: Math.round(drawFit),
       antiPop: Math.round(antiPop),
       finalScore: Math.round(finalScore * 10) / 10,
+      antiPopBreakdown: breakdown,
     });
   }
 
@@ -306,11 +565,11 @@ export function generatePicks(
 function weightedSample(scored: { number: number; score: number }[], count: number): number[] {
   const minScore = Math.min(...scored.map(s => s.score));
   const adjusted = scored.map(s => ({ ...s, weight: s.score - minScore + 1 }));
-  const totalWeight = adjusted.reduce((sum, s) => sum + s.weight, 0);
   const picked: number[] = [];
   const available = [...adjusted];
 
   for (let i = 0; i < count && available.length > 0; i++) {
+    const totalWeight = available.reduce((sum, s) => sum + s.weight, 0);
     let r = Math.random() * totalWeight;
     let selectedIdx = 0;
     for (let j = 0; j < available.length; j++) {

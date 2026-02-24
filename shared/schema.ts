@@ -30,3 +30,101 @@ export const insertUserSchema = createInsertSchema(users).pick({
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
+
+// ── Typed DTOs for analysis pipeline ──
+
+export interface NumberFrequency {
+  number: number;
+  totalFreq: number;
+  last10Freq: number;
+  last25Freq: number;
+  last50Freq: number;
+  drawsSinceSeen: number;
+  rollingTrend: number;
+}
+
+export interface PatternFeatureRow {
+  feature: string;
+  value: number | string;
+  type: "structure" | "recency" | "sequence";
+}
+
+export interface AuditSummary {
+  chiSquareStat: number;
+  chiSquarePValue: number;
+  entropyScore: number;
+  maxEntropy: number;
+  entropyRatio: number;
+  verdict: "pass" | "marginal" | "fail";
+  details: string;
+}
+
+export interface StrategyResult {
+  strategy: string;
+  avgMainMatches: number;
+  bestMainMatches: number;
+  powerballHitRate: number;
+  powerballHits: number;
+  testDraws: number;
+}
+
+export type ValidationVerdict = "no_edge" | "weak_edge" | "possible_edge" | "insufficient_data";
+
+export interface RollingWindow {
+  windowStart: number;
+  windowEnd: number;
+  compositeAvg: number;
+  randomAvg: number;
+  delta: number;
+}
+
+export interface ValidationSummary {
+  verdict: ValidationVerdict;
+  verdictExplanation: string;
+  byStrategy: StrategyResult[];
+  rollingWindows: RollingWindow[];
+  diagnostics: {
+    totalDrawsUsed: number;
+    testSetSize: number;
+    trainSetSize: number;
+    modernFormatOnly: boolean;
+    compositeVsRandomDelta: number;
+  };
+}
+
+export type GeneratorMode = "balanced" | "anti_popular" | "pattern_only" | "random_baseline";
+
+export interface GeneratorConfig {
+  mode: GeneratorMode;
+  drawFitWeight: number;
+  antiPopWeight: number;
+  count: number;
+}
+
+export interface AntiPopularityBreakdown {
+  birthdayPenalty: number;
+  sequencePenalty: number;
+  repeatedEndingPenalty: number;
+  aestheticPenalty: number;
+  lowPowerballPenalty: number;
+}
+
+export interface GeneratedPick {
+  rank: number;
+  numbers: number[];
+  powerball: number;
+  drawFit: number;
+  antiPop: number;
+  finalScore: number;
+  antiPopBreakdown: AntiPopularityBreakdown;
+}
+
+export interface ApiResponse<T> {
+  ok: boolean;
+  meta: {
+    drawsUsed: number;
+    modernFormatOnly: boolean;
+    generatedAt: string;
+  };
+  data: T;
+}
