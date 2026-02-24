@@ -59,6 +59,15 @@ export async function runBenchmark(windowSizes: number[] = [20, 40, 60, 100], mi
   return json.data;
 }
 
+export async function fetchRecommendation() {
+  const res = await fetch("/api/generator/recommendation");
+  const json = await res.json();
+  if (!res.ok || !json.ok) {
+    throw new Error(json.message || "Failed to fetch recommendation");
+  }
+  return json.data;
+}
+
 async function fetchApi(url: string) {
   const res = await fetch(url);
   const json = await res.json();

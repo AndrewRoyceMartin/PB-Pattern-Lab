@@ -13,7 +13,106 @@ import {
   type BenchmarkStrategyWindow,
   type BenchmarkStrategyStability,
   type StabilityClass,
+  type GeneratorMode,
+  type GeneratorRecommendation,
+  type RecommendationEvidence,
+  type RecommendationConfidence,
 } from "@shared/schema";
+
+let latestBenchmarkResult: BenchmarkSummary | null = null;
+let latestBenchmarkTime: string | null = null;
+
+export function storeBenchmarkResult(result: BenchmarkSummary): void {
+  latestBenchmarkResult = result;
+  latestBenchmarkTime = new Date().toISOString();
+}
+
+const STRATEGY_TO_MODE: Record<string, GeneratorMode> = {
+  "Composite": "balanced",
+  "Composite Model": "balanced",
+  "Structure-Aware": "balanced",
+  "Structure-Aware Random": "balanced",
+  "Recency Only": "balanced",
+  "Frequency Only": "balanced",
+  "Most Drawn (All-Time)": "most_drawn_all_time",
+  "Most Drawn (Last 50)": "most_drawn_last_50",
+  "Most Drawn (Last 100)": "most_drawn_last_100",
+  "Random": "random_baseline",
+};
+
+export function getGeneratorRecommendation(): GeneratorRecommendation {
+  if (!latestBenchmarkResult || latestBenchmarkResult.stabilityByStrategy.length === 0) {
+    return {
+      recommendedMode: "balanced",
+      recommendedStrategy: "Balanced",
+      confidence: "low",
+      reasonSummary: "No benchmark validation has been run yet. Run a benchmark on the Validation page to get evidence-based recommendations.",
+      evidence: null,
+      strategyBadges: {},
+      hasBenchmark: false,
+    };
+  }
+
+  const benchmark = latestBenchmarkResult;
+  const stabilities = benchmark.stabilityByStrategy;
+
+  const badges: Record<string, StabilityClass> = {};
+  for (const s of stabilities) {
+    badges[s.strategy] = s.stabilityClass;
+  }
+
+  const possibleEdge = stabilities.filter(s => s.stabilityClass === "possible_edge");
+  const weakEdge = stabilities.filter(s => s.stabilityClass === "weak_edge");
+  const sorted = [...stabilities].sort((a, b) => b.avgDelta - a.avgDelta);
+  const best = sorted[0];
+
+  const evidence: RecommendationEvidence = {
+    bestStrategy: best.strategy,
+    bestStrategyStability: best.stabilityClass,
+    bestAvgDelta: best.avgDelta,
+    windowsTested: benchmark.windowSizesTested,
+    strategiesTested: stabilities.length,
+    lastBenchmarkAt: latestBenchmarkTime!,
+  };
+
+  if (possibleEdge.length > 0) {
+    const top = possibleEdge.sort((a, b) => b.avgDelta - a.avgDelta)[0];
+    const mode = STRATEGY_TO_MODE[top.strategy] || "balanced";
+    const isMostDrawn = top.strategy.startsWith("Most Drawn");
+    return {
+      recommendedMode: mode,
+      recommendedStrategy: top.strategy,
+      confidence: possibleEdge.length >= 2 ? "high" : "medium",
+      reasonSummary: `"${top.strategy}" consistently outperformed random across ${top.windowsBeating} of ${top.windowsTested} test windows (avg delta +${top.avgDelta}). ${isMostDrawn ? "Using this frequency benchmark directly." : "Using balanced mode to blend this signal with anti-popularity protection."}`,
+      evidence,
+      strategyBadges: badges,
+      hasBenchmark: true,
+    };
+  }
+
+  if (weakEdge.length > 0) {
+    const top = weakEdge.sort((a, b) => b.avgDelta - a.avgDelta)[0];
+    return {
+      recommendedMode: "balanced",
+      recommendedStrategy: top.strategy,
+      confidence: "low",
+      reasonSummary: `"${top.strategy}" showed a small advantage in ${top.windowsBeating} of ${top.windowsTested} windows (avg delta +${top.avgDelta}), but it's not stable across all windows. Using balanced mode to mix this weak signal with anti-popularity scoring. Monitor over future benchmarks.`,
+      evidence,
+      strategyBadges: badges,
+      hasBenchmark: true,
+    };
+  }
+
+  return {
+    recommendedMode: "anti_popular",
+    recommendedStrategy: "Low Split-Risk",
+    confidence: "medium",
+    reasonSummary: "No predictive strategy beat random consistently in walk-forward validation. This is expected — lottery draws are designed to be random. Recommending anti-popularity mode to focus on reducing split-risk, which is where the real practical value lies.",
+    evidence,
+    strategyBadges: badges,
+    hasBenchmark: true,
+  };
+}
 
 // ═══════════════════════════════════════════
 // Engine A: Pattern Discovery

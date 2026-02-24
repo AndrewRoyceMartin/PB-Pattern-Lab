@@ -3,11 +3,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Zap, Play, CheckCircle, SearchX, Loader2, Info } from "lucide-react";
+import { Zap, Play, CheckCircle, SearchX, Loader2, Info, Sparkles, AlertTriangle, ArrowRight, Shield } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { generatePicks, fetchApi } from "@/lib/api";
+import { generatePicks, fetchApi, fetchRecommendation } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
-import type { GeneratedPick, GeneratorMode } from "@shared/schema";
+import type { GeneratedPick, GeneratorMode, GeneratorRecommendation } from "@shared/schema";
 
 function Tip({ label, tip, className }: { label: string; tip: string; className?: string }) {
   return (
@@ -22,15 +22,36 @@ function Tip({ label, tip, className }: { label: string; tip: string; className?
   );
 }
 
-const MODES: { value: GeneratorMode; label: string; description: string; drawFit: number; antiPop: number; group?: string }[] = [
-  { value: "balanced", label: "Balanced", description: "60% pattern signals, 40% anti-popularity", drawFit: 60, antiPop: 40 },
+const MODES: { value: GeneratorMode; label: string; description: string; drawFit: number; antiPop: number; group?: string; strategyName?: string }[] = [
+  { value: "balanced", label: "Balanced", description: "60% pattern signals, 40% anti-popularity", drawFit: 60, antiPop: 40, strategyName: "Composite" },
   { value: "anti_popular", label: "Low Split-Risk", description: "20% pattern, 80% anti-popularity", drawFit: 20, antiPop: 80 },
   { value: "pattern_only", label: "Experimental Pattern", description: "100% pattern signals (experimental)", drawFit: 100, antiPop: 0 },
-  { value: "most_drawn_all_time", label: "Most Drawn (All-Time)", description: "Top frequency numbers from full history", drawFit: 100, antiPop: 0, group: "frequency" },
-  { value: "most_drawn_last_50", label: "Most Drawn (Last 50)", description: "Top frequency from last 50 draws", drawFit: 100, antiPop: 0, group: "frequency" },
-  { value: "most_drawn_last_100", label: "Most Drawn (Last 100)", description: "Top frequency from last 100 draws", drawFit: 100, antiPop: 0, group: "frequency" },
-  { value: "random_baseline", label: "Random Baseline", description: "Pure random for comparison", drawFit: 0, antiPop: 0 },
+  { value: "most_drawn_all_time", label: "Most Drawn (All-Time)", description: "Top frequency numbers from full history", drawFit: 100, antiPop: 0, group: "frequency", strategyName: "Most Drawn (All-Time)" },
+  { value: "most_drawn_last_50", label: "Most Drawn (Last 50)", description: "Top frequency from last 50 draws", drawFit: 100, antiPop: 0, group: "frequency", strategyName: "Most Drawn (Last 50)" },
+  { value: "most_drawn_last_100", label: "Most Drawn (Last 100)", description: "Top frequency from last 100 draws", drawFit: 100, antiPop: 0, group: "frequency", strategyName: "Most Drawn (Last 100)" },
+  { value: "random_baseline", label: "Random Baseline", description: "Pure random for comparison", drawFit: 0, antiPop: 0, strategyName: "Random" },
 ];
+
+function StabilityBadge({ stabilityClass }: { stabilityClass: string }) {
+  const config: Record<string, { label: string; className: string }> = {
+    possible_edge: { label: "possible edge", className: "bg-green-500/20 text-green-500" },
+    weak_edge: { label: "weak edge", className: "bg-yellow-500/20 text-yellow-500" },
+    no_edge: { label: "no edge", className: "bg-muted text-muted-foreground" },
+    underperforming: { label: "underperforming", className: "bg-red-500/20 text-red-500" },
+  };
+  const c = config[stabilityClass] || config.no_edge;
+  return <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-mono font-bold ${c.className}`}>{c.label}</span>;
+}
+
+function ConfidenceBadge({ confidence }: { confidence: string }) {
+  const config: Record<string, { className: string }> = {
+    high: { className: "bg-green-500/20 text-green-500 border-green-500/30" },
+    medium: { className: "bg-yellow-500/20 text-yellow-500 border-yellow-500/30" },
+    low: { className: "bg-orange-500/20 text-orange-500 border-orange-500/30" },
+  };
+  const c = config[confidence] || config.low;
+  return <span className={`inline-block px-2 py-0.5 rounded border text-xs font-mono font-bold uppercase ${c.className}`}>{confidence}</span>;
+}
 
 export default function PickGenerator() {
   const { toast } = useToast();
@@ -40,6 +61,11 @@ export default function PickGenerator() {
   const [isGenerating, setIsGenerating] = useState(false);
 
   const { data: stats } = useQuery({ queryKey: ["/api/stats"], queryFn: () => fetchApi("/api/stats") });
+  const { data: recommendation } = useQuery<GeneratorRecommendation>({
+    queryKey: ["/api/generator/recommendation"],
+    queryFn: fetchRecommendation,
+    enabled: !!stats?.modernDraws,
+  });
   const hasData = stats?.modernDraws > 0;
 
   const currentMode = MODES.find(m => m.value === selectedMode)!;
@@ -62,6 +88,25 @@ export default function PickGenerator() {
     }
   };
 
+  const handleApplyRecommendation = () => {
+    if (!recommendation) return;
+    setSelectedMode(recommendation.recommendedMode);
+    if (recommendation.recommendedMode === "balanced") {
+      setCustomAntiPop([40]);
+    }
+    toast({ title: "Recommendation applied", description: `Switched to ${recommendation.recommendedStrategy} mode.` });
+  };
+
+  const isRecommended = recommendation && selectedMode === recommendation.recommendedMode;
+
+  function getBadgeForMode(mode: typeof MODES[number]): string | null {
+    if (!recommendation?.hasBenchmark || !recommendation.strategyBadges) return null;
+    if (mode.strategyName && recommendation.strategyBadges[mode.strategyName]) {
+      return recommendation.strategyBadges[mode.strategyName];
+    }
+    return null;
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-end">
@@ -77,9 +122,56 @@ export default function PickGenerator() {
         </Button>
       </div>
 
+      {recommendation && (
+        <Card className={`border-border ${
+          !recommendation.hasBenchmark ? "border-orange-500/30 bg-orange-500/5" :
+          recommendation.confidence === "high" ? "border-green-500/30 bg-green-500/5" :
+          recommendation.confidence === "medium" ? "border-yellow-500/30 bg-yellow-500/5" :
+          "border-orange-500/30 bg-orange-500/5"
+        }`} data-testid="card-recommendation">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center text-lg">
+              {recommendation.hasBenchmark ? <Sparkles className="w-5 h-5 mr-2 text-yellow-500" /> : <AlertTriangle className="w-5 h-5 mr-2 text-orange-500" />}
+              <Tip label="Recommended Technique" tip="This recommendation is automatically generated based on the latest benchmark validation results. It picks the strategy and mode most supported by the evidence." />
+            </CardTitle>
+            <CardDescription>
+              {recommendation.hasBenchmark ? "Based on latest benchmark validation results" : "No benchmark data available yet"}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-col md:flex-row md:items-start gap-4">
+              <div className="flex-1 space-y-3">
+                <div className="flex items-center gap-3">
+                  <span className="text-xl font-bold font-mono" data-testid="text-recommended-strategy">{recommendation.recommendedStrategy}</span>
+                  <ConfidenceBadge confidence={recommendation.confidence} />
+                  {isRecommended && <span className="text-xs text-green-500 font-mono font-bold">ACTIVE</span>}
+                </div>
+                <p className="text-sm text-muted-foreground leading-relaxed">{recommendation.reasonSummary}</p>
+
+                {recommendation.evidence && (
+                  <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs font-mono text-muted-foreground pt-2 border-t border-border/30">
+                    <Tip label={`Best: ${recommendation.evidence.bestStrategy}`} tip="The strategy with the highest average delta vs random across all tested windows." />
+                    <Tip label={`Avg delta: ${recommendation.evidence.bestAvgDelta >= 0 ? "+" : ""}${recommendation.evidence.bestAvgDelta}`} tip="Average number of extra main-ball matches per draw compared to random. Positive = better than random." className={recommendation.evidence.bestAvgDelta > 0 ? "text-green-500" : ""} />
+                    <Tip label={`Windows: ${recommendation.evidence.windowsTested.join(", ")}`} tip="The test window sizes used in the benchmark (number of draws per test window)." />
+                    <Tip label={`Strategies: ${recommendation.evidence.strategiesTested}`} tip="Total number of predictive strategies tested in the benchmark." />
+                  </div>
+                )}
+              </div>
+
+              {!isRecommended && (
+                <Button onClick={handleApplyRecommendation} variant="outline" className="shrink-0 border-primary/50 text-primary hover:bg-primary/10 font-mono" data-testid="button-apply-recommendation">
+                  <ArrowRight className="w-4 h-4 mr-2" /> APPLY
+                </Button>
+              )}
+            </div>
+
+            <p className="text-[10px] text-muted-foreground/60 font-mono mt-3">You can override this recommendation manually by selecting any mode below.</p>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-1 space-y-6">
-          {/* Mode Selector */}
           <Card className="border-border">
             <CardHeader>
               <CardTitle className="text-lg">Model Objective</CardTitle>
@@ -89,6 +181,8 @@ export default function PickGenerator() {
               {MODES.map((mode, i) => {
                 const prevMode = i > 0 ? MODES[i - 1] : null;
                 const showFreqLabel = mode.group === "frequency" && prevMode?.group !== "frequency";
+                const badge = getBadgeForMode(mode);
+                const modeIsRecommended = recommendation?.hasBenchmark && recommendation.recommendedMode === mode.value;
                 return (
                   <div key={mode.value}>
                     {showFreqLabel && (
@@ -103,7 +197,13 @@ export default function PickGenerator() {
                       }`}
                       data-testid={`button-mode-${mode.value}`}
                     >
-                      <div className="font-medium text-sm">{mode.label}</div>
+                      <div className="flex items-center justify-between">
+                        <div className="font-medium text-sm flex items-center gap-2">
+                          {mode.label}
+                          {modeIsRecommended && <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-500 font-mono font-bold">REC</span>}
+                        </div>
+                        {badge && <StabilityBadge stabilityClass={badge} />}
+                      </div>
                       <div className="text-xs opacity-70 mt-0.5">{mode.description}</div>
                     </button>
                   </div>
@@ -112,7 +212,6 @@ export default function PickGenerator() {
             </CardContent>
           </Card>
 
-          {/* Custom Weights (Balanced only) */}
           {selectedMode === "balanced" && (
             <Card className="border-border">
               <CardHeader>
@@ -132,7 +231,6 @@ export default function PickGenerator() {
             </Card>
           )}
 
-          {/* Penalties */}
           <Card className="border-border">
             <CardHeader className="pb-3">
               <CardTitle className="text-sm font-mono text-muted-foreground uppercase tracking-wider">Anti-Popularity Penalties</CardTitle>
@@ -194,7 +292,6 @@ export default function PickGenerator() {
                     </div>
                   </div>
 
-                  {/* Anti-popularity breakdown on hover/expand */}
                   {pick.antiPopBreakdown && (
                     <div className="mt-3 pt-3 border-t border-border/30 flex gap-4 text-xs font-mono text-muted-foreground flex-wrap">
                       <span className="flex items-center gap-1"><Info className="w-3 h-3" /> Penalties:</span>

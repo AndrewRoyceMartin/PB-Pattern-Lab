@@ -1,0 +1,296 @@
+Goal
+
+On the Pick Generator page, the app should recommend a technique/strategy automatically based on the latest validation benchmark results.
+
+That makes the generator smarter and keeps it aligned with evidence.
+
+What the recommendation should do
+If validation shows no predictive edge
+
+Recommend:
+
+Low Split-Risk / Anti-Popularity (practical mode), or
+
+Random Baseline (if user wants pure chance)
+
+If a strategy shows weak but unstable edge
+
+Recommend:
+
+Balanced mode (mix validated signal + anti-popularity)
+
+Include a note like “weak/unstable; monitor over more windows”
+
+If a strategy shows consistent positive edge
+
+Recommend:
+
+That strategy directly (e.g., most_drawn_last_50 or composite)
+
+Show supporting stats from validation
+
+Replit Instructions — Add “Recommended Technique” to Pick Generator
+Step 1 — Add recommendation logic on the server
+File to edit
+
+server/analysis.ts (or create server/recommendation.ts if you want cleaner separation)
+
+Add a function
+
+Create something like:
+
+recommendGeneratorTechnique(validationBenchmarkResult)
+
+Inputs
+
+Use the benchmark validation output you just added:
+
+strategy stability summary
+
+delta vs random by window
+
+overall verdicts
+
+optional diversity diagnostics
+
+Output (recommended shape)
+
+Return:
+
+recommendedStrategy
+
+recommendedMode (e.g. balanced, anti_popular, pattern_only)
+
+confidence (low, medium, high)
+
+reasonSummary (plain English)
+
+evidence (small metrics object for UI)
+
+Step 2 — Define recommendation rules (simple, strong rules first)
+Suggested rule set (v1)
+Rule A — No edge detected (most common)
+
+If all predictive strategies are no_edge or underperforming:
+
+Recommend:
+
+mode = "anti_popular"
+
+strategy = "random" OR "composite" with draw-fit weight near zero
+
+Confidence: medium
+
+Reason:
+
+“No predictor beat random in walk-forward validation. Recommend low split-risk generation.”
+
+Rule B — Weak edge only
+
+If one strategy is weak_edge and others are no edge:
+
+Recommend:
+
+mode = "balanced"
+
+strategy = best weak-edge strategy
+
+Confidence: low
+
+Reason:
+
+“This strategy showed a small advantage in some windows, but not stable enough for pattern-only mode.”
+
+Rule C — Possible edge
+
+If one strategy is possible_edge across multiple windows:
+
+Recommend:
+
+mode = "pattern_only" or balanced
+
+strategy = top performer
+
+Confidence: medium (or high only if repeated strongly)
+
+Reason:
+
+“Consistently outperformed random across multiple windows.”
+
+Rule D — Validation unavailable
+
+If no benchmark exists yet:
+
+Recommend:
+
+mode = "balanced"
+
+strategy = "random" or default baseline
+
+Confidence: low
+
+Reason:
+
+“Run Validation Benchmark first to enable evidence-based recommendations.”
+
+Step 3 — Persist or fetch latest validation benchmark result
+Option A (fastest)
+
+When user runs benchmark validation, store latest benchmark result in memory/server state and use it for recommendation.
+
+Option B (better)
+
+Store validation benchmark summary in DB (or a table/cache JSON) and fetch latest successful result.
+
+Practical v1 recommendation
+
+Use latest in-memory result first (fast to build), then persist later.
+
+Step 4 — Expose recommendation via API
+Add endpoint (recommended)
+
+GET /api/generator/recommendation
+
+OR extend:
+
+POST /api/generate to return a recommendation block when requested
+
+Endpoint response example (concept)
+
+Return:
+
+recommended technique
+
+reason
+
+benchmark evidence
+
+fallback note if no validation run yet
+
+This keeps frontend simple.
+
+Step 5 — Add “Recommended Technique” panel to Generator page
+File to edit
+
+client/src/pages/generator.tsx
+
+Add a UI section at the top
+
+Show a card/banner like:
+
+Recommended Technique
+
+Recommended: Low Split-Risk (Anti-Popularity)
+
+Based on: Validation benchmark (20/40/60 draw windows)
+
+Reason: No predictive strategy beat random
+
+Confidence: Medium
+
+Also add a button:
+
+Apply Recommendation
+
+When clicked:
+
+auto-select strategy/mode in generator controls
+
+adjust weights (draw-fit vs anti-popularity)
+
+Step 6 — Add “Manual Override” (important)
+
+Don’t force users into the recommendation.
+
+Add:
+
+toggle or note: “You can override this recommendation manually.”
+
+This keeps the app flexible and transparent.
+
+Step 7 — Show supporting evidence in the Generator page
+
+Under the recommendation, show compact metrics:
+
+Best strategy from validation
+
+Avg delta vs random
+
+Windows tested
+
+Stability class
+
+Last benchmark run time
+
+This builds trust in the recommendation.
+
+Step 8 — Add fallback behavior (must-have)
+
+If no validation has been run yet:
+
+Show recommendation panel in a warning/info state:
+
+“No benchmark validation found. Run validation to get a recommended technique.”
+
+Default generator mode to:
+
+balanced or anti_popular
+
+Step 9 — Optional but very good: recommendation badges on strategies
+
+In the generator strategy dropdown, annotate options like:
+
+Most Drawn (Last 50) — weak edge
+
+Composite — no edge
+
+Random — baseline
+
+Low Split-Risk — recommended
+
+This makes selection easier.
+
+Step 10 — Update replit.md
+
+Add a section documenting:
+
+how recommendation is derived
+
+that it is based on validation benchmark outcomes
+
+that recommendation is not a guarantee of winning numbers
+
+Replit “Plan Work” tasks (copy/paste)
+Task 1 — Add server-side generator recommendation engine
+
+Create recommendation function based on validation benchmark results
+
+Return recommended strategy/mode, confidence, plain-English reason, and evidence metrics
+
+Implement fallback when no validation results exist
+
+Task 2 — Add recommendation API endpoint
+
+Expose latest recommendation for generator page
+
+Include benchmark metadata (windows tested, last run time, strategy stability)
+
+Task 3 — Add Generator page recommendation panel
+
+Show recommended technique card with confidence and reason
+
+Add “Apply Recommendation” button to auto-fill generator settings
+
+Support manual override
+
+Task 4 — Add evidence summary and fallback UI states
+
+Show benchmark evidence used for recommendation
+
+Show prompt to run validation if no benchmark exists
+
+Task 5 — Update replit.md documentation
+
+Document recommendation logic and how it depends on validation benchmark results
+
+Note that recommendation optimizes strategy selection, not guaranteed outcomes

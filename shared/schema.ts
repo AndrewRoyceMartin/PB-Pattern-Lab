@@ -151,6 +151,27 @@ export interface GeneratedPick {
   antiPopBreakdown: AntiPopularityBreakdown;
 }
 
+export type RecommendationConfidence = "low" | "medium" | "high";
+
+export interface RecommendationEvidence {
+  bestStrategy: string;
+  bestStrategyStability: StabilityClass;
+  bestAvgDelta: number;
+  windowsTested: number[];
+  strategiesTested: number;
+  lastBenchmarkAt: string;
+}
+
+export interface GeneratorRecommendation {
+  recommendedMode: GeneratorMode;
+  recommendedStrategy: string;
+  confidence: RecommendationConfidence;
+  reasonSummary: string;
+  evidence: RecommendationEvidence | null;
+  strategyBadges: Record<string, StabilityClass>;
+  hasBenchmark: boolean;
+}
+
 export interface ApiResponse<T> {
   ok: boolean;
   meta: {

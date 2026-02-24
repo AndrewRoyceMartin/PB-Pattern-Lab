@@ -11,6 +11,8 @@ import {
   runBenchmarkValidation,
   generateRankedPicks,
   generateMostDrawnCards,
+  storeBenchmarkResult,
+  getGeneratorRecommendation,
 } from "./analysis";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -165,7 +167,18 @@ export async function registerRoutes(
         return res.status(400).json({ ok: false, message: `Only ${draws.length} modern draws available. Need at least 120 (min window + min training) for benchmark.` });
       }
       const results = runBenchmarkValidation(draws, windowSizes, minTrainDraws);
+      storeBenchmarkResult(results);
       res.json(apiResponse(draws, results));
+    } catch (error: any) {
+      res.status(500).json({ ok: false, message: error.message });
+    }
+  });
+
+  app.get("/api/generator/recommendation", async (_req, res) => {
+    try {
+      const recommendation = getGeneratorRecommendation();
+      const draws = await storage.getModernDraws();
+      res.json(apiResponse(draws, recommendation));
     } catch (error: any) {
       res.status(500).json({ ok: false, message: error.message });
     }

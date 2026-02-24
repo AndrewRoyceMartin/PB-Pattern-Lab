@@ -32,6 +32,15 @@ The app follows a monorepo structure with three main directories:
   - Plain-English Most Drawn summary card on Validation page
   - Generator supports Most Drawn modes with diverse card generation from frequency-ranked pools
   - Deterministic tie-breaking (count > recency > number) for reproducible results
+- **2026-02-24**: Added evidence-based generator recommendation engine:
+  - Server-side recommendation logic derived from latest benchmark validation results
+  - Rules: possible_edge → use that strategy directly; weak_edge → balanced mode; no_edge → anti-popularity mode
+  - `GET /api/generator/recommendation` endpoint returns recommended mode, confidence, reason, evidence, and strategy badges
+  - Benchmark results stored in memory and used for recommendations
+  - Generator page shows "Recommended Technique" card with confidence badge, reason, evidence metrics, and "Apply" button
+  - Strategy selector annotated with stability badges (possible edge, weak edge, no edge, underperforming) and "REC" label
+  - Manual override always available; recommendation is not a guarantee of winning numbers
+  - New shared types: GeneratorRecommendation, RecommendationEvidence, RecommendationConfidence
 
 ## User Preferences
 
@@ -65,6 +74,7 @@ Preferred communication style: Simple, everyday language.
   - `GET /api/analysis/features` — Structure and carryover feature extraction
   - `GET /api/analysis/audit` — Randomness audit (chi-square + entropy)
   - `GET /api/analysis/validation` — Walk-forward backtest with verdict classification
+  - `GET /api/generator/recommendation` — Evidence-based technique recommendation from latest benchmark
   - `POST /api/generate` — Generate ranked picks with mode selection and configurable weights
 - **Analysis Engine** (`server/analysis.ts`): Three engines:
   - Engine A (Pattern Discovery): frequency, structure, carryover, rolling drift
