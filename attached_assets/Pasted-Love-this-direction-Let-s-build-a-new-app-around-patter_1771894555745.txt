@@ -1,0 +1,410 @@
+Love this direction. Let’s build a new app around pattern discovery → validation → pick generation.
+
+New app concept
+Powerball Pattern Lab (AU)
+
+A Replit Streamlit app that:
+
+Imports past Powerball results
+
+Finds candidate patterns (time/date, number structure, recency, co-occurrence, etc.)
+
+Validates them (backtests + Monte Carlo/permutation)
+
+Generates ranked picks using only validated signals
+
+Optionally scores “anti-popularity” (low split-risk)
+
+Build plan for Replit (phased)
+Phase 1 — Core working app (do this first)
+
+Goal: Get a reliable pattern lab + baseline pick generator running.
+
+Features
+
+CSV import (your AU Powerball format)
+
+Era/rule normalization (modern format filter: 7 mains + Powerball)
+
+Pattern feature extraction:
+
+number frequency/recency
+
+draw structure (odd/even, sum, spread, decade buckets)
+
+carryover overlap from previous draws
+
+Randomness audit:
+
+frequency test
+
+rolling trends
+
+pair counts (basic)
+
+Backtest:
+
+walk-forward validation
+
+compare strategies:
+
+random
+
+frequency
+
+recency
+
+composite (basic)
+
+Pick generator:
+
+top 10 cards for next draw
+
+ranked with confidence (backtest-derived later)
+
+Phase 2 — Stronger validation
+
+Goal: Stop false patterns.
+
+Add
+
+Monte Carlo simulated draw histories
+
+Permutation testing for discovered patterns
+
+Multiple-comparison correction
+
+Stability scoring across rolling windows
+
+Edge classification (no_edge, weak_edge, possible_edge)
+
+Phase 3 — Anti-popularity engine (likely best practical value)
+
+Goal: Improve expected payout conditional on winning.
+
+Add
+
+Popularity heuristics:
+
+1–31 birthday concentration penalty
+
+sequence penalty
+
+repeated endings penalty
+
+“nice pattern” penalty
+
+Ticket “split-risk” score
+
+Modes:
+
+Balanced
+
+Anti-popular
+
+Pure random
+
+Experimental pattern-aware
+
+Phase 4 — Experimental plugin lab
+
+Goal: Test speculative ideas without contaminating core model.
+
+Optional plugins
+
+planetary alignments
+
+moon phase
+
+holiday effects
+
+weather
+
+jackpot size / rollover count
+
+All plugin signals must pass the same validation gates.
+
+Replit app structure (recommended)
+/
+├── app.py                      # Streamlit UI
+├── config.py                   # Settings, ranges, thresholds
+├── requirements.txt
+├── README.md
+│
+├── data/
+│   └── (uploaded csv, local db optional)
+│
+├── core/
+│   ├── ingest.py               # CSV parsing + schema normalization
+│   ├── schema.py               # data schemas / constants
+│   ├── timeutils.py            # AU timezone / draw datetime handling
+│   └── utils.py
+│
+├── patterns/
+│   ├── feature_builder.py      # candidate feature generation
+│   ├── structure_features.py   # odd/even, sums, spread, decades, endings
+│   ├── recency_features.py     # time-since-seen, rolling counts
+│   ├── carryover_features.py   # overlap with previous draws
+│   ├── pair_features.py        # pair/triple co-occurrence metrics
+│   └── calendar_features.py    # month/season/week/year etc.
+│
+├── audit/
+│   ├── randomness_tests.py     # chi-square, runs, entropy, etc.
+│   ├── drift.py                # rolling drift / change-point helpers
+│   └── monte_carlo.py          # simulated random histories
+│
+├── models/
+│   ├── baselines.py            # random / frequency / recency strategies
+│   ├── composite_ranker.py     # pattern-to-picks scoring formula
+│   ├── validation.py           # walk-forward backtests
+│   └── calibration.py          # confidence calibration from backtests
+│
+├── picks/
+│   ├── generator.py            # candidate card generation
+│   ├── scorer.py               # card scoring (draw-fit + anti-popularity)
+│   └── popularity.py           # split-risk / popularity heuristics
+│
+└── reports/
+    ├── summaries.py            # plain-English summaries
+    └── exports.py              # CSV exports
+Data schema (core normalized format)
+
+This is the internal schema every module should use:
+
+draw_id (int)
+
+draw_datetime_local (ISO)
+
+draw_datetime_utc (ISO)
+
+numbers_json (JSON list of 7 ints)
+
+powerball (int)
+
+is_modern_format (bool)
+
+source_row_hash (optional)
+
+This keeps all downstream modules stable.
+
+Pattern features to implement first (high-value set)
+Number-level features
+
+For each number n in 1–35:
+
+freq_all_n
+
+freq_last_10_n
+
+freq_last_25_n
+
+freq_last_50_n
+
+days_since_seen_n (or draws since seen)
+
+rolling_trend_n (e.g., last 10 minus prior 10)
+
+Draw-level structural features
+
+Per draw:
+
+odd count
+
+even count
+
+low/high split
+
+sum
+
+range (max-min)
+
+consecutive count
+
+repeated ending digits count
+
+decade bucket counts
+
+Temporal / sequence features
+
+carryover count from previous draw
+
+carryover from last 3 draws
+
+month / quarter / week-of-year / year
+
+era segment (rule/machine period)
+
+Pair features (v1)
+
+top supported pairs only
+
+pair lift vs expectation
+
+support threshold required
+
+Pick generation strategy design (important)
+Candidate generation
+
+Generate many candidate cards (random + weighted sampling)
+
+Enforce valid Powerball ranges
+
+Filter duplicates
+
+Card scoring (v1 composite)
+
+Each card gets:
+
+1) Draw-fit score (experimental)
+
+Based on validated patterns only:
+
+number-level recency/frequency signals
+
+structural fit score
+
+carryover/pair score (if validated)
+
+2) Anti-popularity score (practical)
+
+Penalise likely common picks:
+
+too many numbers ≤31
+
+obvious sequences
+
+repeated endings
+
+“pretty” patterns
+
+3) Final rank score
+
+Weighted combination:
+
+Balanced mode = 60% draw-fit + 40% anti-popularity
+
+Anti-popular mode = 20% draw-fit + 80% anti-popularity
+
+Pattern-only mode = 100% draw-fit (experimental)
+
+Validation framework (must-have from day 1)
+
+This is what separates your app from most lottery tools.
+
+Walk-forward backtest
+
+For each test draw:
+
+train on prior draws only
+
+generate top 10 cards
+
+score against actual draw
+
+compare strategies
+
+Baselines to include
+
+random
+
+frequency-only
+
+recency-only
+
+structure-aware random
+
+composite model
+
+Metrics
+
+best main matches (top 10)
+
+avg main matches (top 10)
+
+Powerball hit rate
+
+exact pair hit counts (optional)
+
+diversity metrics
+
+top-card overlap between strategies
+
+Replit build steps (what to do right now)
+Step 1
+
+Create a new Replit Python app (Streamlit).
+
+Step 2
+
+Add requirements.txt:
+
+streamlit
+
+pandas
+
+numpy
+
+scipy
+
+statsmodels
+
+python-dateutil
+
+(We can add plotting/libs later.)
+
+Step 3
+
+Build the first vertical slice:
+
+upload CSV
+
+parse/normalize draws
+
+show cleaned table
+
+run basic frequency + structure analysis
+
+generate a simple top-10 pick list (frequency + anti-popularity heuristic)
+
+Step 4
+
+Add walk-forward backtesting before adding fancy algorithms.
+
+What I recommend we build first (actual implementation order)
+
+If we start coding next, I’d do this exact sequence:
+
+core/ingest.py
+
+patterns/structure_features.py
+
+patterns/recency_features.py
+
+models/baselines.py
+
+picks/popularity.py
+
+picks/generator.py
+
+models/validation.py
+
+app.py UI pages
+
+That gets you a working app fast, then we improve.
+
+My thoughts on likely positive results (honest)
+
+If by “positive” you mean jackpot prediction, unlikely.
+
+If by “positive” you mean:
+
+finding real, testable irregularities
+
+generating better-structured picks
+
+reducing split-risk
+
+building a research-grade pattern lab
+then yes — very likely.
+
+That’s a solid project and a much stronger app tha
