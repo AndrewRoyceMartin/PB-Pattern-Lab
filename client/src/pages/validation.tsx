@@ -2,11 +2,40 @@ import { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { AlertCircle, Target, GitCompare, LayoutDashboard, TrendingUp, BarChart3, Info, Play, Loader2, Download, Shield } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchApi, runBenchmark } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import type { ValidationSummary, BenchmarkSummary } from "@shared/schema";
+
+const STRATEGY_DESCRIPTIONS: Record<string, string> = {
+  "Random": "Pure random number selection — the baseline every strategy must beat to be useful.",
+  "Frequency Only": "Picks the 7 most frequently drawn main numbers from all training data. Tests whether historically common numbers appear more often.",
+  "Recency Only": "Picks numbers that appeared most recently. Tests whether \"hot\" numbers tend to repeat in the short term.",
+  "Structure-Aware Random": "Random picks filtered to match typical draw structure (odd/even balance, sum range). Tests whether structural constraints improve results.",
+  "Structure-Aware": "Random picks filtered to match typical draw structure (odd/even balance, sum range). Tests whether structural constraints improve results.",
+  "Composite Model": "Blends frequency, recency, and trend signals into a weighted score. The main predictive model under test.",
+  "Composite": "Blends frequency, recency, and trend signals into a weighted score. The main predictive model under test.",
+  "Most Drawn (All-Time)": "Picks the 7 most frequently drawn numbers across the entire dataset. A simple frequency benchmark — does historical popularity predict future draws?",
+  "Most Drawn (Last 50)": "Picks the 7 most frequent numbers from the last 50 draws only. Tests whether recent frequency trends outperform long-term averages.",
+  "Most Drawn (Last 100)": "Picks the 7 most frequent numbers from the last 100 draws. A mid-range frequency window between all-time and short-term.",
+};
+
+function StrategyName({ name, className }: { name: string; className?: string }) {
+  const description = STRATEGY_DESCRIPTIONS[name];
+  if (!description) return <span className={className}>{name}</span>;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className={`${className ?? ""} cursor-help border-b border-dotted border-current`}>{name}</span>
+      </TooltipTrigger>
+      <TooltipContent side="right" className="max-w-xs text-xs">
+        <p>{description}</p>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
 
 export default function Validation() {
   const { toast } = useToast();
@@ -148,7 +177,7 @@ export default function Validation() {
                         const isMostDrawn = result.strategy.startsWith("Most Drawn");
                         return (
                           <tr key={i} className={`hover:bg-secondary/20 transition-colors ${isMostDrawn ? "bg-blue-500/5" : ""}`}>
-                            <td className={`p-3 font-bold ${isMostDrawn ? "text-blue-400" : isRandom ? "text-muted-foreground" : ""}`}>{result.strategy}</td>
+                            <td className={`p-3 font-bold ${isMostDrawn ? "text-blue-400" : isRandom ? "text-muted-foreground" : ""}`}><StrategyName name={result.strategy} /></td>
                             <td className="p-3 text-right font-bold">{result.avgMainMatches}</td>
                             <td className="p-3 text-right">{result.bestMainMatches}/7</td>
                             <td className="p-3 text-right">{result.powerballHitRate}%</td>
@@ -371,7 +400,7 @@ export default function Validation() {
                     <tbody className="divide-y divide-border/50">
                       {benchmark.stabilityByStrategy.map((s, i) => (
                         <tr key={i} className="hover:bg-secondary/20 transition-colors">
-                          <td className={`p-3 font-bold ${s.strategy.startsWith("Most Drawn") ? "text-blue-400" : ""}`}>{s.strategy}</td>
+                          <td className={`p-3 font-bold ${s.strategy.startsWith("Most Drawn") ? "text-blue-400" : ""}`}><StrategyName name={s.strategy} /></td>
                           <td className="p-3 text-center">{s.windowsTested}</td>
                           <td className="p-3 text-center text-green-500 font-bold">{s.windowsBeating}</td>
                           <td className="p-3 text-center text-red-500 font-bold">{s.windowsLosing}</td>
@@ -427,7 +456,7 @@ export default function Validation() {
                             {windowRows.map((r, j) => (
                               <tr key={j} className={`hover:bg-secondary/20 transition-colors ${r.strategy.startsWith("Most Drawn") ? "bg-blue-500/5" : ""}`}>
                                 <td className={`p-2.5 font-bold ${r.strategy === "Random" ? "text-muted-foreground" : r.strategy.startsWith("Most Drawn") ? "text-blue-400" : ""}`}>
-                                  {r.strategy}
+                                  <StrategyName name={r.strategy} />
                                 </td>
                                 <td className="p-2.5 text-right font-bold">{r.avgMainMatches}</td>
                                 <td className="p-2.5 text-right">{r.bestMainMatches}/7</td>
