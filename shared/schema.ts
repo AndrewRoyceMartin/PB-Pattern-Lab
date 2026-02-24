@@ -47,6 +47,9 @@ export interface PatternFeatureRow {
   feature: string;
   value: number | string;
   type: "structure" | "recency" | "sequence";
+  percentile?: number | null;
+  typicality?: "typical" | "uncommon" | "rare" | null;
+  normalRange?: string | null;
 }
 
 export interface AuditSummary {
@@ -57,6 +60,23 @@ export interface AuditSummary {
   entropyRatio: number;
   verdict: "pass" | "marginal" | "fail";
   details: string;
+  scope: "main" | "powerball" | "combined";
+  drawsUsed: number;
+  interpretation: string;
+}
+
+export interface StructureProfile {
+  oddEvenMode: string;
+  sumMedian: number;
+  sumQ10: number;
+  sumQ90: number;
+  rangeMedian: number;
+  rangeQ10: number;
+  rangeQ90: number;
+  lowHighMode: string;
+  avgCarryover: number;
+  avgConsecutive: number;
+  drawsAnalyzed: number;
 }
 
 export interface StrategyResult {

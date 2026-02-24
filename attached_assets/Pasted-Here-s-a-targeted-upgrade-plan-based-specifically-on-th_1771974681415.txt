@@ -1,0 +1,486 @@
+Here’s a targeted upgrade plan based specifically on the panels in your screenshots (Randomness Audit, Extracted Features, Number Frequencies), focused on quick wins first so you get visible improvements fast.
+
+Targeted Upgrade Plan for Current Screens
+Goal
+
+Improve:
+
+interpretability (what the numbers mean),
+
+trustworthiness (avoid overclaiming),
+
+workflow (turn analysis into strategy actions).
+
+Quick Wins (fast impact, low risk)
+1) Randomness Audit — improve wording and interpretation
+What to change (UI text)
+
+Your current verdict is strong (FAIL), which is fine, but add a clearer interpretation line:
+
+Add a small note under verdict
+
+Fail = observed historical frequencies differ from ideal uniform expectation
+
+This does not by itself imply predictive signal
+
+Why
+
+Prevents users from reading “FAIL” as “we found a winning formula.”
+
+Replit task snippet
+
+Update Randomness Audit card copy
+
+Add a short “How to interpret” tooltip/modal
+
+2) Randomness Audit — split into two audits (Main vs Powerball)
+What to change
+
+Show separate mini-cards:
+
+Main Numbers Audit
+
+Powerball Audit
+
+Why
+
+Main numbers and Powerball are different distributions and should not be blended.
+
+Display (example)
+
+verdict
+
+chi-square
+
+p-value
+
+entropy ratio
+
+sample size (draws used)
+
+Backend note
+
+If currently pooled, compute separately.
+
+3) Extracted Features (Latest Draw) — add “Typicality” column
+What to add
+
+New column:
+
+Typicality (or %ile)
+
+Example rows:
+
+sum = 135 → 62nd percentile → Typical
+
+carryover_from_prev = 2 → 78th percentile → Common
+
+repeated_endings = 4 → Rare
+
+Why
+
+Makes the feature table meaningful immediately.
+
+Backend requirement
+
+For each feature, compute historical distribution and percentile rank using training/loaded draws.
+
+4) Extracted Features — add “Expected / Normal Range” column
+What to add
+
+For structure features (sum, range, odd_count, etc.):
+
+Normal Range (e.g., 10th–90th percentile)
+
+or common discrete values for counts
+
+Example:
+
+odd_count = 3 | normal range 2–5
+
+sum = 135 | normal range 92–168
+
+Why
+
+This helps users see whether the latest draw was unusual.
+
+5) Number Frequencies table — add sort presets (buttons)
+What to add above the table
+
+Buttons/tabs:
+
+Top All-Time
+
+Hot (L10)
+
+Hot (L25)
+
+Hot (L50)
+
+Cold (L50)
+
+Most Overdue
+
+Trend Up
+
+Trend Down
+
+Why
+
+Turns the table into a strategy research tool.
+
+6) Number Frequencies table — define “Trend” with tooltip
+What to add
+
+Info icon on Trend column with exact formula.
+
+Even one line helps:
+
+Trend = L10 minus prior-L10 frequency (normalized) (or whatever you use)
+
+Why
+
+Makes the metric usable and auditable.
+
+Medium Improvements (high value, moderate effort)
+7) Randomness Audit — add “drill-down actions”
+
+When verdict = FAIL, show buttons:
+
+Check by Rolling Window
+
+Check by Era / Format
+
+Run Monte Carlo Benchmark (future feature)
+
+Open Validation Page
+
+Why
+
+A warning becomes a workflow.
+
+8) Add “Historical Structure Profile” panel (new panel on Patterns page)
+What to show
+
+A compact summary card of typical draw shapes:
+
+most common odd/even split
+
+sum median + quantile band
+
+range median + quantile band
+
+average carryover from previous draw
+
+common consecutive count
+
+Why
+
+This directly supports structure_matched_random and helps users understand what “structure fit” means.
+
+9) Add “Latest Draw vs Historical” visual flags
+
+In your Extracted Features table, add a badge/colour for:
+
+Typical
+
+Uncommon
+
+Rare
+
+Suggested thresholds
+
+Typical: percentile between 20–80
+
+Uncommon: 5–20 or 80–95
+
+Rare: <5 or >95
+
+Why
+
+Makes the table instantly scannable.
+
+10) Add Number Frequency derived scores preview
+
+Add optional columns (toggle on/off):
+
+hot_score
+
+cold_score
+
+recency_score
+
+combined_rank_preview
+
+Why
+
+This bridges pattern analysis and strategy implementation.
+
+Deep Improvements (next layer, bigger payoff)
+11) Era-aware audit and feature analysis
+What to add
+
+A filter/switch:
+
+All Data
+
+Modern Format Only
+
+Selected Date Range
+
+Why
+
+Prevents false “non-randomness” caused by mixed formats/eras.
+
+Apply to:
+
+randomness audit
+
+frequency table
+
+feature distributions
+
+validation benchmark
+
+12) Monte Carlo baseline panel for audit (excellent next research feature)
+What to add
+
+For key metrics (chi-square, hottest-number count, pair peaks, etc.), show:
+
+real value
+
+simulated distribution range
+
+percentile of real value among simulations
+
+Why
+
+This tells you whether observed anomalies are truly unusual under randomness.
+
+13) Feature significance / stability panel
+What to add
+
+For each feature family (frequency, carryover, structure):
+
+stability across rolling windows
+
+predictive correlation (if any) vs random benchmark
+
+“use in generator?” status
+
+Why
+
+This helps decide which features feed the composite strategy.
+
+14) “Pattern to Strategy” handoff actions
+
+From the Patterns page:
+
+Build Strategy from Current Sort
+
+Test as Benchmark
+
+Use in Generator (temporary mode)
+
+Why
+
+Turns the app into a true pattern lab workflow.
+
+Specific improvements for each screenshot panel
+A) Randomness Audit panel (your screenshot #1)
+Keep
+
+Verdict
+
+Chi-square
+
+Entropy
+
+Entropy ratio
+
+Add (recommended)
+
+Draws used
+
+Scope (Main / Powerball / All | Modern-only)
+
+Expected model (uniform frequency, no replacement)
+
+Interpretation note (non-randomness ≠ predictive edge)
+
+Actions (rolling window, era split, benchmark)
+
+UI tweak
+
+Use a less absolute badge than only FAIL/PASS:
+
+PASS
+
+FLAGGED
+
+FAIL
+This gives more nuance.
+
+B) Extracted Features table (your screenshots #2 and #3)
+Keep
+
+Feature / Value / Class (great format)
+
+Add
+
+%ile
+
+Typicality badge
+
+Historical reference (median / common values)
+
+Bonus
+
+Group rows visually:
+
+Structure
+
+Sequence
+
+Carryover
+
+(Later) Temporal
+
+C) Number Frequencies table (your screenshots #4–#6)
+Keep
+
+Total / L10 / L25 / L50 / Since / Trend — excellent set
+
+Add
+
+Sorting presets
+
+Formula help for Trend
+
+Toggle for normalized rates (optional)
+
+Rank column per selected sort
+
+“Use in strategy” quick action
+
+Optional UI enhancement
+
+Freeze first column and header row if not already (especially useful on long tables).
+
+Backend changes required (mapped to your current architecture)
+Server analysis layer
+
+Add/extend functions for:
+
+runRandomnessAuditMain()
+
+runRandomnessAuditPowerball()
+
+computeFeaturePercentiles()
+
+computeStructureProfileSummary()
+
+getFrequencySortView(sortMode)
+
+getAuditInterpretationContext() (copy + metadata)
+
+Shared types
+
+Add DTO fields for:
+
+audit scope metadata
+
+percentile / typicality
+
+normal range reference
+
+sort preset identifiers
+
+structure profile summary
+
+Client pages
+
+Patterns page:
+
+split audit cards
+
+add feature table columns
+
+add frequency presets and tooltips
+
+add structure profile card
+
+Replit Plan Work tasks (copy/paste)
+Task 1 — Improve Randomness Audit interpretation and split by scope
+
+Split audit into Main Numbers and Powerball cards
+
+Add draws used, scope label, and interpretation note
+
+Clarify that audit failure does not imply predictive edge
+
+Add quick actions to investigate further (rolling window, era split, validation)
+
+Task 2 — Add percentile and typicality context to Extracted Features table
+
+Compute historical percentile for each latest-draw feature
+
+Add %ile and Typicality badge columns (Typical/Uncommon/Rare)
+
+Add normal range/reference values for structure features
+
+Task 3 — Upgrade Number Frequencies table with sort presets and tooltips
+
+Add presets: Top All-Time, Hot L10/L25/L50, Cold L50, Most Overdue, Trend Up/Down
+
+Add Trend formula tooltip/help text
+
+Allow users to apply a preset without losing current data context
+
+Task 4 — Add Historical Structure Profile panel
+
+Show common odd/even, low/high split, sum/range bands, carryover stats
+
+Use loaded/filtered draw set and display sample size/scope
+
+Prepare this panel for future structure-matched random strategy tuning
+
+Task 5 — Add era/scope labeling and filtering support to Patterns page
+
+Display whether metrics are computed on All Data or Modern Format Only
+
+Add filter controls or labels to avoid mixed-era interpretation errors
+
+Ensure audit and frequency tables use the same selected scope
+
+Task 6 — Update replit.md with analysis-page enhancements
+
+Document split randomness audits, feature percentiles, frequency sort presets, and structure profile panel
+
+Add interpretation guidance notes for audit verdicts
+
+Recommended order (quickest visible improvement)
+
+Task 1 (audit wording + split scope)
+
+Task 3 (frequency presets + trend tooltip)
+
+Task 2 (feature percentiles)
+
+Task 4 (structure profile)
+
+Task 5 (era/scope filters)
+
+Task 6 (replit.md)
+
+Why this matters before adding more strategies
+
+These upgrades make your app much better at:
+
+explaining why a strategy exists,
+
+debugging weak/no-edge results,
+
+and avoiding false conclusions.
+
+That will make the next strategy sprint (the 5 new strategies) easier and more reliable.

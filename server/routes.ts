@@ -6,7 +6,10 @@ import type { ApiResponse, GeneratorMode } from "@shared/schema";
 import {
   computeNumberFrequencies,
   computePatternFeatures,
+  computeStructureProfile,
   runRandomnessAudit,
+  runRandomnessAuditMain,
+  runRandomnessAuditPowerball,
   runWalkForwardValidation,
   runBenchmarkValidation,
   generateRankedPicks,
@@ -146,8 +149,19 @@ export async function registerRoutes(
   app.get("/api/analysis/audit", async (_req, res) => {
     try {
       const draws = await storage.getModernDraws();
-      const audit = runRandomnessAudit(draws);
-      res.json(apiResponse(draws, audit));
+      const mainAudit = runRandomnessAuditMain(draws);
+      const pbAudit = runRandomnessAuditPowerball(draws);
+      res.json(apiResponse(draws, { main: mainAudit, powerball: pbAudit }));
+    } catch (error: any) {
+      res.status(500).json({ ok: false, message: error.message });
+    }
+  });
+
+  app.get("/api/analysis/structure-profile", async (_req, res) => {
+    try {
+      const draws = await storage.getModernDraws();
+      const profile = computeStructureProfile(draws);
+      res.json(apiResponse(draws, profile));
     } catch (error: any) {
       res.status(500).json({ ok: false, message: error.message });
     }

@@ -195,7 +195,114 @@ export function computePatternFeatures(draws: Draw[]): { structure: PatternFeatu
   if (draws.length === 0) return { structure: [], carryover: [] };
   const structure = computeStructureFeatures(draws[0]);
   const carryover = computeCarryoverFeatures(draws);
+
+  if (draws.length >= 10) {
+    const historicalValues = computeHistoricalFeatureDistributions(draws.slice(1));
+    const allFeatures = [...structure, ...carryover];
+    for (const f of allFeatures) {
+      if (typeof f.value === "number" && historicalValues[f.feature]) {
+        const dist = historicalValues[f.feature];
+        const pct = computePercentile(dist, f.value);
+        f.percentile = pct;
+        f.typicality = pct >= 20 && pct <= 80 ? "typical" : (pct >= 5 && pct <= 95 ? "uncommon" : "rare");
+        const q10 = quantile(dist, 0.1);
+        const q90 = quantile(dist, 0.9);
+        f.normalRange = `${q10}–${q90}`;
+      }
+    }
+  }
+
   return { structure, carryover };
+}
+
+function computeHistoricalFeatureDistributions(draws: Draw[]): Record<string, number[]> {
+  const result: Record<string, number[]> = {};
+  for (const draw of draws) {
+    const nums = draw.numbers as number[];
+    const sorted = [...nums].sort((a, b) => a - b);
+    const oddCount = nums.filter(n => n % 2 !== 0).length;
+    const sum = nums.reduce((a, b) => a + b, 0);
+    const range = sorted[sorted.length - 1] - sorted[0];
+    const lowCount = nums.filter(n => n <= 17).length;
+
+    let consecutiveCount = 0;
+    for (let i = 1; i < sorted.length; i++) {
+      if (sorted[i] - sorted[i - 1] === 1) consecutiveCount++;
+    }
+
+    const endings = nums.map(n => n % 10);
+    const endingCounts: Record<number, number> = {};
+    endings.forEach(e => { endingCounts[e] = (endingCounts[e] || 0) + 1; });
+    const repeatedEndings = Object.values(endingCounts).filter(c => c > 1).length;
+
+    const decades: Record<string, number> = { "1-9": 0, "10-19": 0, "20-29": 0, "30-35": 0 };
+    nums.forEach(n => {
+      if (n < 10) decades["1-9"]++;
+      else if (n < 20) decades["10-19"]++;
+      else if (n < 30) decades["20-29"]++;
+      else decades["30-35"]++;
+    });
+
+    const push = (key: string, val: number) => {
+      if (!result[key]) result[key] = [];
+      result[key].push(val);
+    };
+
+    push("odd_count", oddCount);
+    push("even_count", 7 - oddCount);
+    push("sum", sum);
+    push("range", range);
+    push("consecutive_count", consecutiveCount);
+    push("repeated_endings", repeatedEndings);
+    push("decade_1_9", decades["1-9"]);
+    push("decade_10_19", decades["10-19"]);
+    push("decade_20_29", decades["20-29"]);
+    push("decade_30_35", decades["30-35"]);
+  }
+
+  if (draws.length >= 2) {
+    for (let i = 0; i < draws.length - 1; i++) {
+      const current = draws[i].numbers as number[];
+      const prev = draws[i + 1].numbers as number[];
+      const carryover = current.filter(n => prev.includes(n)).length;
+      if (!result["carryover_from_prev"]) result["carryover_from_prev"] = [];
+      result["carryover_from_prev"].push(carryover);
+    }
+  }
+
+  if (draws.length >= 4) {
+    for (let i = 0; i < draws.length - 3; i++) {
+      const current = draws[i].numbers as number[];
+      const last3Nums = new Set<number>();
+      for (let j = 1; j <= 3; j++) {
+        (draws[i + j].numbers as number[]).forEach(n => last3Nums.add(n));
+      }
+      const carryover3 = current.filter(n => last3Nums.has(n)).length;
+      if (!result["carryover_from_last_3"]) result["carryover_from_last_3"] = [];
+      result["carryover_from_last_3"].push(carryover3);
+    }
+  }
+
+  return result;
+}
+
+function computePercentile(dist: number[], value: number): number {
+  const sorted = [...dist].sort((a, b) => a - b);
+  let count = 0;
+  for (const v of sorted) {
+    if (v < value) count++;
+    else if (v === value) count += 0.5;
+  }
+  return Math.round((count / sorted.length) * 100);
+}
+
+function quantile(dist: number[], q: number): number {
+  const sorted = [...dist].sort((a, b) => a - b);
+  const pos = (sorted.length - 1) * q;
+  const lo = Math.floor(pos);
+  const hi = Math.ceil(pos);
+  if (lo === hi) return sorted[lo];
+  return Math.round(sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo));
 }
 
 function computeStructureFeatures(draw: Draw): PatternFeatureRow[] {
@@ -260,15 +367,77 @@ function computeCarryoverFeatures(draws: Draw[]): PatternFeatureRow[] {
   return features;
 }
 
+export function computeStructureProfile(draws: Draw[]): StructureProfile {
+  if (draws.length < 5) {
+    return { oddEvenMode: "N/A", sumMedian: 0, sumQ10: 0, sumQ90: 0, rangeMedian: 0, rangeQ10: 0, rangeQ90: 0, lowHighMode: "N/A", avgCarryover: 0, avgConsecutive: 0, drawsAnalyzed: 0 };
+  }
+
+  const oddCounts: number[] = [];
+  const sums: number[] = [];
+  const ranges: number[] = [];
+  const lowCounts: number[] = [];
+  const consecutives: number[] = [];
+  const carryovers: number[] = [];
+
+  for (let i = 0; i < draws.length; i++) {
+    const nums = draws[i].numbers as number[];
+    const sorted = [...nums].sort((a, b) => a - b);
+    oddCounts.push(nums.filter(n => n % 2 !== 0).length);
+    sums.push(nums.reduce((a, b) => a + b, 0));
+    ranges.push(sorted[sorted.length - 1] - sorted[0]);
+    lowCounts.push(nums.filter(n => n <= 17).length);
+
+    let consec = 0;
+    for (let j = 1; j < sorted.length; j++) {
+      if (sorted[j] - sorted[j - 1] === 1) consec++;
+    }
+    consecutives.push(consec);
+
+    if (i < draws.length - 1) {
+      const prev = draws[i + 1].numbers as number[];
+      carryovers.push(nums.filter(n => prev.includes(n)).length);
+    }
+  }
+
+  const mode = (arr: number[]): number => {
+    const counts: Record<number, number> = {};
+    arr.forEach(v => { counts[v] = (counts[v] || 0) + 1; });
+    return Number(Object.entries(counts).sort(([, a], [, b]) => b - a)[0][0]);
+  };
+
+  const oddMode = mode(oddCounts);
+  const lowMode = mode(lowCounts);
+
+  return {
+    oddEvenMode: `${oddMode} odd / ${7 - oddMode} even`,
+    sumMedian: quantile(sums, 0.5),
+    sumQ10: quantile(sums, 0.1),
+    sumQ90: quantile(sums, 0.9),
+    rangeMedian: quantile(ranges, 0.5),
+    rangeQ10: quantile(ranges, 0.1),
+    rangeQ90: quantile(ranges, 0.9),
+    lowHighMode: `${lowMode} low / ${7 - lowMode} high`,
+    avgCarryover: carryovers.length > 0 ? Number((carryovers.reduce((a, b) => a + b, 0) / carryovers.length).toFixed(1)) : 0,
+    avgConsecutive: Number((consecutives.reduce((a, b) => a + b, 0) / consecutives.length).toFixed(1)),
+    drawsAnalyzed: draws.length,
+  };
+}
+
 // ═══════════════════════════════════════════
 // Randomness Audit
 // ═══════════════════════════════════════════
 
 export function runRandomnessAudit(draws: Draw[]): AuditSummary {
+  return runRandomnessAuditMain(draws);
+}
+
+export function runRandomnessAuditMain(draws: Draw[]): AuditSummary {
   if (draws.length < 20) {
     return {
       chiSquareStat: 0, chiSquarePValue: 1, entropyScore: 0, maxEntropy: 0,
-      entropyRatio: 0, verdict: "fail", details: "Insufficient data for audit (need 20+ draws)."
+      entropyRatio: 0, verdict: "fail", details: "Insufficient data for audit (need 20+ draws).",
+      scope: "main", drawsUsed: draws.length,
+      interpretation: "Not enough data to perform a meaningful audit."
     };
   }
 
@@ -299,16 +468,20 @@ export function runRandomnessAudit(draws: Draw[]): AuditSummary {
 
   let verdict: "pass" | "marginal" | "fail";
   let details: string;
+  let interpretation: string;
 
   if (pValue > 0.05 && entropyRatio > 0.95) {
     verdict = "pass";
-    details = "Number distribution appears consistent with random draws. No significant deviations detected.";
+    details = "Main number distribution appears consistent with random draws. No significant deviations detected.";
+    interpretation = "The frequencies of main numbers (1-35) are statistically consistent with uniform random selection. No exploitable pattern detected.";
   } else if (pValue > 0.01 && entropyRatio > 0.90) {
     verdict = "marginal";
-    details = "Minor deviations from uniform distribution detected. Could be natural variance or a weak signal worth monitoring.";
+    details = "Minor deviations from uniform distribution detected in main numbers. Could be natural variance or a weak signal worth monitoring.";
+    interpretation = "Some main numbers appear slightly more or less often than expected, but this is within the range of normal statistical fluctuation. This does not imply a predictive edge.";
   } else {
     verdict = "fail";
-    details = "Significant deviation from uniform distribution. This may indicate structural patterns or data quality issues.";
+    details = "Significant deviation from uniform distribution in main numbers. This may indicate structural patterns or data quality issues.";
+    interpretation = "The observed frequency distribution of main numbers differs significantly from what uniform randomness would produce. This is common in real lottery data and does not by itself imply a predictive signal — it may reflect natural variance over the sample period.";
   }
 
   return {
@@ -317,8 +490,68 @@ export function runRandomnessAudit(draws: Draw[]): AuditSummary {
     entropyScore: Number(entropy.toFixed(4)),
     maxEntropy: Number(maxEntropy.toFixed(4)),
     entropyRatio: Number(entropyRatio.toFixed(4)),
-    verdict,
-    details,
+    verdict, details, scope: "main", drawsUsed: draws.length, interpretation,
+  };
+}
+
+export function runRandomnessAuditPowerball(draws: Draw[]): AuditSummary {
+  if (draws.length < 20) {
+    return {
+      chiSquareStat: 0, chiSquarePValue: 1, entropyScore: 0, maxEntropy: 0,
+      entropyRatio: 0, verdict: "fail", details: "Insufficient data for Powerball audit (need 20+ draws).",
+      scope: "powerball", drawsUsed: draws.length,
+      interpretation: "Not enough data to perform a meaningful audit."
+    };
+  }
+
+  const observed: number[] = new Array(20).fill(0);
+  for (const d of draws) {
+    observed[d.powerball - 1]++;
+  }
+  const totalBalls = draws.length;
+  const expected = totalBalls / 20;
+
+  let chiSquare = 0;
+  for (let i = 0; i < 20; i++) {
+    chiSquare += Math.pow(observed[i] - expected, 2) / expected;
+  }
+
+  const df = 19;
+  const pValue = 1 - chiSquaredCDF(chiSquare, df);
+
+  const probs = observed.map(o => o / totalBalls);
+  let entropy = 0;
+  for (const p of probs) {
+    if (p > 0) entropy -= p * Math.log2(p);
+  }
+  const maxEntropy = Math.log2(20);
+  const entropyRatio = entropy / maxEntropy;
+
+  let verdict: "pass" | "marginal" | "fail";
+  let details: string;
+  let interpretation: string;
+
+  if (pValue > 0.05 && entropyRatio > 0.95) {
+    verdict = "pass";
+    details = "Powerball distribution appears consistent with random draws. No significant deviations detected.";
+    interpretation = "Powerball frequencies (1-20) are statistically consistent with uniform random selection.";
+  } else if (pValue > 0.01 && entropyRatio > 0.90) {
+    verdict = "marginal";
+    details = "Minor deviations from uniform distribution detected in Powerball numbers.";
+    interpretation = "Some Powerball values appear slightly more or less often than expected. This is within normal statistical fluctuation and does not imply predictability.";
+  } else {
+    verdict = "fail";
+    details = "Significant deviation from uniform distribution in Powerball numbers.";
+    interpretation = "The Powerball frequency distribution differs significantly from uniform randomness. This is a statistical observation — it does not mean Powerball draws are predictable.";
+  }
+
+  return {
+    chiSquareStat: Number(chiSquare.toFixed(2)),
+    chiSquarePValue: Number(pValue.toFixed(4)),
+    entropyScore: Number(entropy.toFixed(4)),
+    maxEntropy: Number(maxEntropy.toFixed(4)),
+    entropyRatio: Number(entropyRatio.toFixed(4)),
+    verdict, details, scope: "powerball", drawsUsed: draws.length, interpretation,
   };
 }
 

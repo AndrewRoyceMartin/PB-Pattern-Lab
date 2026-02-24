@@ -15,6 +15,7 @@ export async function uploadCSV(file: File) {
   queryClient.invalidateQueries({ queryKey: ["/api/analysis/features"] });
   queryClient.invalidateQueries({ queryKey: ["/api/analysis/audit"] });
   queryClient.invalidateQueries({ queryKey: ["/api/analysis/validation"] });
+  queryClient.invalidateQueries({ queryKey: ["/api/analysis/structure-profile"] });
   return json.data;
 }
 
@@ -30,6 +31,7 @@ export async function resetData() {
   queryClient.invalidateQueries({ queryKey: ["/api/analysis/features"] });
   queryClient.invalidateQueries({ queryKey: ["/api/analysis/audit"] });
   queryClient.invalidateQueries({ queryKey: ["/api/analysis/validation"] });
+  queryClient.invalidateQueries({ queryKey: ["/api/analysis/structure-profile"] });
   return json.data;
 }
 

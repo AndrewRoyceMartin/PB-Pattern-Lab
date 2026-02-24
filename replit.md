@@ -50,6 +50,18 @@ The app follows a monorepo structure with three main directories:
   - All 5 strategies added to: strategy registry (benchmark), single-window validation, generator modes, recommendation engine, UI selectors, and strategy tooltips
   - Recommendation engine updated: no-edge recommends Anti-Popular Only; structure-matched advantage recommends Structure-Matched Random
   - Generator mode count: 12 (up from 7); validation strategy count: 13 (up from 8)
+- **2026-02-24**: Pattern Lab analysis page upgrades:
+  - Randomness Audit split into separate Main Numbers (1-35) and Powerball (1-20) audit cards with independent chi-square/entropy tests
+  - Audit verdicts use PASS/FLAGGED/FAIL labels with interpretation notes explaining that non-randomness does not imply predictive edge
+  - Audit cards show scope, draws used, and "Open Validation" action button when verdict is not PASS
+  - Extracted Features table expanded with %ile (percentile rank), Typicality badge (Typical/Uncommon/Rare), and Normal Range (10th-90th percentile) columns
+  - Historical Structure Profile panel showing most common odd/even split, low/high split, sum/range medians with quantile bands, avg carryover, avg consecutive pairs
+  - Number Frequencies table upgraded with 9 sort presets: # Order, Top All-Time, Hot L10/L25/L50, Cold L50, Most Overdue, Trend Up/Down
+  - Rank column appears when a sort preset is active
+  - Trend column has tooltip explaining formula (L10 frequency minus prior-L10 frequency)
+  - All metrics tooltips added to chi-square, entropy, entropy ratio, structure profile values
+  - New API endpoints: `GET /api/analysis/structure-profile`; audit endpoint now returns `{main, powerball}` object
+  - New shared types: StructureProfile; AuditSummary extended with scope, drawsUsed, interpretation fields; PatternFeatureRow extended with percentile, typicality, normalRange fields
 
 ## User Preferences
 
