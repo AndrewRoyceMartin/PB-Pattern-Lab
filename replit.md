@@ -41,6 +41,15 @@ The app follows a monorepo structure with three main directories:
   - Strategy selector annotated with stability badges (possible edge, weak edge, no edge, underperforming) and "REC" label
   - Manual override always available; recommendation is not a guarantee of winning numbers
   - New shared types: GeneratorRecommendation, RecommendationEvidence, RecommendationConfidence
+- **2026-02-24**: Strategy Expansion Sprint — 5 new strategies:
+  - Most Drawn (Last 20): short-window frequency strategy using only last 20 training draws
+  - Least Drawn (Last 50): contrarian baseline picking coldest numbers from last 50 draws
+  - Structure-Matched Random: random picks constrained by historical draw structure (odd/even, sum, low/high, spread)
+  - Anti-Popular Only: pure anti-popularity scoring with no pattern signals — maximum split-risk reduction
+  - Diversity Optimized: optimizes number coverage across top 10 cards with overlap penalties
+  - All 5 strategies added to: strategy registry (benchmark), single-window validation, generator modes, recommendation engine, UI selectors, and strategy tooltips
+  - Recommendation engine updated: no-edge recommends Anti-Popular Only; structure-matched advantage recommends Structure-Matched Random
+  - Generator mode count: 12 (up from 7); validation strategy count: 13 (up from 8)
 
 ## User Preferences
 
@@ -55,7 +64,7 @@ Preferred communication style: Simple, everyday language.
   - `/ingest` — CSV file upload for importing Powerball draw data
   - `/patterns` — Pattern Lab (frequency analysis, structure features, randomness audit with chi-square/entropy)
   - `/validation` — Walk-forward backtest with verdict classification, strategy comparison, rolling windows, diagnostics
-  - `/generator` — Pick generation with 7 modes (Balanced, Low Split-Risk, Experimental Pattern, Most Drawn All-Time/Last 50/Last 100, Random Baseline), anti-popularity breakdown
+  - `/generator` — Pick generation with 12 modes (Balanced, Low Split-Risk, Anti-Popular Only, Experimental Pattern, Structure-Matched Random, Diversity Optimized, Most Drawn All-Time/Last 100/Last 50/Last 20, Least Drawn Last 50, Random Baseline), anti-popularity breakdown
 - **UI Components**: shadcn/ui (new-york style) built on Radix UI primitives with Tailwind CSS
 - **State Management**: TanStack React Query for server state; local React state for UI
 - **Styling**: Tailwind CSS v4 with CSS variables for theming; dark mode by default for a "lab" aesthetic
@@ -78,9 +87,9 @@ Preferred communication style: Simple, everyday language.
   - `POST /api/generate` — Generate ranked picks with mode selection and configurable weights
 - **Analysis Engine** (`server/analysis.ts`): Three engines:
   - Engine A (Pattern Discovery): frequency, structure, carryover, rolling drift
-  - Engine B (Validation): walk-forward backtest with 8 strategies (Random, Frequency, Recency, Structure-Aware, Composite, Most Drawn All-Time, Most Drawn Last 50, Most Drawn Last 100), rolling windows, verdict classification (no_edge/weak_edge/possible_edge/insufficient_data), "beats random" flag per strategy
-  - Engine B2 (Multi-Window Benchmark): tests all strategies across configurable window sizes (20/40/60/100 draws), computes per-window deltas vs random, aggregates into stability classification (possible_edge/weak_edge/no_edge/underperforming), CSV export
-  - Engine C (Generator): ranked picks with draw-fit scoring, anti-popularity penalties (birthday, sequence, endings, aesthetic, low PB), 7 generation modes including 3 Most Drawn frequency benchmarks
+  - Engine B (Validation): walk-forward backtest with 13 strategies (Random, Frequency, Recency, Structure-Aware, Composite, Most Drawn All-Time/Last 100/Last 50/Last 20, Least Drawn Last 50, Structure-Matched Random, Anti-Popular Only, Diversity Optimized), rolling windows, verdict classification (no_edge/weak_edge/possible_edge/insufficient_data), "beats random" flag per strategy
+  - Engine B2 (Multi-Window Benchmark): tests all 13 strategies across configurable window sizes (20/40/60/100 draws), computes per-window deltas vs random, aggregates into stability classification (possible_edge/weak_edge/no_edge/underperforming), CSV export
+  - Engine C (Generator): ranked picks with draw-fit scoring, anti-popularity penalties (birthday, sequence, endings, aesthetic, low PB), 12 generation modes including frequency benchmarks (Most Drawn, Least Drawn), Structure-Matched Random, Anti-Popular Only, and Diversity Optimized
 - **Dev Server**: Vite middleware is integrated into Express for HMR during development
 - **Production Build**: Vite builds the client; esbuild bundles the server into `dist/index.cjs`
 

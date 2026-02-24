@@ -37,6 +37,11 @@ const STRATEGY_TO_MODE: Record<string, GeneratorMode> = {
   "Most Drawn (All-Time)": "most_drawn_all_time",
   "Most Drawn (Last 50)": "most_drawn_last_50",
   "Most Drawn (Last 100)": "most_drawn_last_100",
+  "Most Drawn (Last 20)": "most_drawn_last_20",
+  "Least Drawn (Last 50)": "least_drawn_last_50",
+  "Structure-Matched Random": "structure_matched_random",
+  "Anti-Popular Only": "anti_popular_only",
+  "Diversity Optimized": "diversity_optimized",
   "Random": "random_baseline",
 };
 
@@ -103,11 +108,24 @@ export function getGeneratorRecommendation(): GeneratorRecommendation {
     };
   }
 
+  const structureMatched = stabilities.find(s => s.strategy === "Structure-Matched Random");
+  if (structureMatched && structureMatched.avgDelta > 0.05) {
+    return {
+      recommendedMode: "structure_matched_random",
+      recommendedStrategy: "Structure-Matched Random",
+      confidence: "low",
+      reasonSummary: `No predictive edge found, but "Structure-Matched Random" showed a small structural advantage (avg delta +${structureMatched.avgDelta}). Using structure-matched mode for better baseline coverage. Anti-popularity protection is still your main practical advantage.`,
+      evidence,
+      strategyBadges: badges,
+      hasBenchmark: true,
+    };
+  }
+
   return {
-    recommendedMode: "anti_popular",
-    recommendedStrategy: "Low Split-Risk",
+    recommendedMode: "anti_popular_only",
+    recommendedStrategy: "Anti-Popular Only",
     confidence: "medium",
-    reasonSummary: "No predictive strategy beat random consistently in walk-forward validation. This is expected — lottery draws are designed to be random. Recommending anti-popularity mode to focus on reducing split-risk, which is where the real practical value lies.",
+    reasonSummary: "No predictive strategy beat random consistently in walk-forward validation. This is expected — lottery draws are designed to be random. Recommending Anti-Popular Only mode to focus entirely on reducing split-risk, which is where the real practical value lies.",
     evidence,
     strategyBadges: badges,
     hasBenchmark: true,
@@ -437,7 +455,32 @@ export function runWalkForwardValidation(draws: Draw[]): ValidationSummary {
     return buildMostDrawnPick(train, 100);
   });
 
-  const strategies = [randomResult, freqResult, recencyResult, structureResult, compositeResult, mostDrawnAllTime, mostDrawnLast50, mostDrawnLast100];
+  const mostDrawnLast20 = scoreStrategy("Most Drawn (Last 20)", (train) => {
+    return buildMostDrawnPick(train, 20);
+  });
+
+  const leastDrawnLast50 = scoreStrategy("Least Drawn (Last 50)", (train) => {
+    return buildLeastDrawnPick(train, 50);
+  });
+
+  const structureMatchedResult = scoreStrategy("Structure-Matched Random", (train) => {
+    return { picks: generateStructureMatchedCard(train), pb: Math.floor(Math.random() * 20) + 1 };
+  });
+
+  const antiPopularResult = scoreStrategy("Anti-Popular Only", () => {
+    return generateAntiPopularPick();
+  });
+
+  const diversityResult = scoreStrategy("Diversity Optimized", (train) => {
+    const freqs = computeNumberFrequencies(train);
+    const scored = freqs.map(f => ({
+      number: f.number,
+      score: f.last25Freq * 2 + f.last10Freq * 3 - f.drawsSinceSeen * 0.5 + f.rollingTrend * 2,
+    }));
+    return { picks: weightedSample(scored, 7), pb: Math.floor(Math.random() * 20) + 1 };
+  });
+
+  const strategies = [randomResult, freqResult, recencyResult, structureResult, compositeResult, mostDrawnAllTime, mostDrawnLast50, mostDrawnLast100, mostDrawnLast20, leastDrawnLast50, structureMatchedResult, antiPopularResult, diversityResult];
 
   const rollingWindows = computeRollingWindows(draws);
 
@@ -526,6 +569,33 @@ function getStrategyRegistry(): { name: string; fn: StrategyFn }[] {
     {
       name: "Most Drawn (Last 100)",
       fn: (train) => buildMostDrawnPick(train, 100),
+    },
+    {
+      name: "Most Drawn (Last 20)",
+      fn: (train) => buildMostDrawnPick(train, 20),
+    },
+    {
+      name: "Least Drawn (Last 50)",
+      fn: (train) => buildLeastDrawnPick(train, 50),
+    },
+    {
+      name: "Structure-Matched Random",
+      fn: (train) => ({ picks: generateStructureMatchedCard(train), pb: Math.floor(Math.random() * 20) + 1 }),
+    },
+    {
+      name: "Anti-Popular Only",
+      fn: () => generateAntiPopularPick(),
+    },
+    {
+      name: "Diversity Optimized",
+      fn: (train) => {
+        const freqs = computeNumberFrequencies(train);
+        const scored = freqs.map(f => ({
+          number: f.number,
+          score: f.last25Freq * 2 + f.last10Freq * 3 - f.drawsSinceSeen * 0.5 + f.rollingTrend * 2,
+        }));
+        return { picks: weightedSample(scored, 7), pb: Math.floor(Math.random() * 20) + 1 };
+      },
     },
   ];
 }
@@ -796,6 +866,322 @@ function generateMostDrawnCards(draws: Draw[], windowSize: number, count: number
   return candidates.slice(0, count).map((c, i) => ({ ...c, rank: i + 1 }));
 }
 
+function buildLeastDrawnPick(draws: Draw[], windowSize: number): { picks: number[]; pb: number } {
+  const window = draws.slice(0, Math.min(windowSize, draws.length));
+  if (window.length === 0) return { picks: generateRandomCard(), pb: Math.floor(Math.random() * 20) + 1 };
+
+  const mainCounts: { number: number; count: number; lastSeen: number }[] = [];
+  for (let n = 1; n <= 35; n++) {
+    let count = 0;
+    let lastSeen = window.length;
+    for (let i = 0; i < window.length; i++) {
+      if ((window[i].numbers as number[]).includes(n)) {
+        count++;
+        if (i < lastSeen) lastSeen = i;
+      }
+    }
+    mainCounts.push({ number: n, count, lastSeen });
+  }
+  mainCounts.sort((a, b) => a.count - b.count || b.lastSeen - a.lastSeen || a.number - b.number);
+  const picks = mainCounts.slice(0, 7).map(m => m.number).sort((a, b) => a - b);
+
+  const pbCounts: { number: number; count: number; lastSeen: number }[] = [];
+  for (let n = 1; n <= 20; n++) {
+    let count = 0;
+    let lastSeen = window.length;
+    for (let i = 0; i < window.length; i++) {
+      if (window[i].powerball === n) {
+        count++;
+        if (i < lastSeen) lastSeen = i;
+      }
+    }
+    pbCounts.push({ number: n, count, lastSeen });
+  }
+  pbCounts.sort((a, b) => a.count - b.count || b.lastSeen - a.lastSeen || a.number - b.number);
+  const pb = pbCounts[0]?.number ?? 1;
+
+  return { picks, pb };
+}
+
+function generateStructureMatchedCard(draws: Draw[]): number[] {
+  if (draws.length < 5) return generateRandomCard();
+
+  const sampleSize = Math.min(draws.length, 100);
+  let avgOdd = 0;
+  let avgSum = 0;
+  let avgLow = 0;
+  let avgRange = 0;
+  for (let i = 0; i < sampleSize; i++) {
+    const nums = draws[i].numbers as number[];
+    const sorted = [...nums].sort((a, b) => a - b);
+    avgOdd += nums.filter(n => n % 2 !== 0).length;
+    avgSum += nums.reduce((a, b) => a + b, 0);
+    avgLow += nums.filter(n => n <= 17).length;
+    avgRange += sorted[sorted.length - 1] - sorted[0];
+  }
+  avgOdd = Math.round(avgOdd / sampleSize);
+  avgSum = Math.round(avgSum / sampleSize);
+  avgLow = Math.round(avgLow / sampleSize);
+  avgRange = Math.round(avgRange / sampleSize);
+
+  let bestCard = generateRandomCard();
+  let bestFit = Infinity;
+
+  for (let attempt = 0; attempt < 200; attempt++) {
+    const card = generateRandomCard();
+    const odd = card.filter(n => n % 2 !== 0).length;
+    const sum = card.reduce((a, b) => a + b, 0);
+    const low = card.filter(n => n <= 17).length;
+    const range = card[card.length - 1] - card[0];
+
+    const fit = Math.abs(odd - avgOdd) + Math.abs(sum - avgSum) / 15 + Math.abs(low - avgLow) + Math.abs(range - avgRange) / 5;
+    if (fit < bestFit) {
+      bestFit = fit;
+      bestCard = card;
+    }
+    if (fit < 1.5) return card;
+  }
+  return bestCard;
+}
+
+function generateAntiPopularPick(): { picks: number[]; pb: number } {
+  let bestCard = generateRandomCard();
+  let bestPb = Math.floor(Math.random() * 20) + 1;
+  let bestScore = -1;
+
+  for (let attempt = 0; attempt < 200; attempt++) {
+    const card = generateRandomCard();
+    const pb = Math.floor(Math.random() * 13) + 8;
+    const { score } = scoreAntiPopularity(card, pb);
+    if (score > bestScore) {
+      bestScore = score;
+      bestCard = card;
+      bestPb = pb;
+    }
+  }
+  return { picks: bestCard, pb: bestPb };
+}
+
+function generateDiverseCards(draws: Draw[], count: number): GeneratedPick[] {
+  const freqs = computeNumberFrequencies(draws);
+  const scored = freqs.map(f => ({
+    number: f.number,
+    score: f.last25Freq * 2 + f.last10Freq * 3 - f.drawsSinceSeen * 0.5 + f.rollingTrend * 2,
+  }));
+  const pbFreqs = getPbFreqs(draws.slice(0, 50));
+
+  const candidatePool: GeneratedPick[] = [];
+  const seen = new Set<string>();
+
+  for (let attempt = 0; attempt < count * 50 && candidatePool.length < count * 5; attempt++) {
+    let card: number[];
+    let pb: number;
+
+    if (attempt % 3 === 0) {
+      card = weightedSample(scored, 7);
+      const pbEntries = Object.entries(pbFreqs).sort(([, a], [, b]) => b - a);
+      pb = pbEntries.length > 0 ? Number(pbEntries[Math.floor(Math.random() * Math.min(5, pbEntries.length))][0]) : Math.floor(Math.random() * 20) + 1;
+    } else if (attempt % 3 === 1) {
+      card = generateStructureMatchedCard(draws);
+      pb = Math.floor(Math.random() * 20) + 1;
+    } else {
+      card = generateRandomCard();
+      pb = Math.floor(Math.random() * 20) + 1;
+    }
+
+    const key = card.join(",") + ":" + pb;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const drawFit = computeDrawFitScore(card, scored);
+    const { score: antiPop, breakdown } = scoreAntiPopularity(card, pb);
+    const finalScore = (drawFit * 50 + antiPop * 50) / 100;
+
+    candidatePool.push({
+      rank: 0,
+      numbers: card,
+      powerball: pb,
+      drawFit: Math.round(drawFit),
+      antiPop: Math.round(antiPop),
+      finalScore: Math.round(finalScore * 10) / 10,
+      antiPopBreakdown: breakdown,
+    });
+  }
+
+  candidatePool.sort((a, b) => b.finalScore - a.finalScore);
+
+  const selected: GeneratedPick[] = [];
+  const usedPbs = new Set<number>();
+  const usedNumbers = new Map<number, number>();
+
+  for (const candidate of candidatePool) {
+    if (selected.length >= count) break;
+
+    let overlapPenalty = 0;
+    for (const n of candidate.numbers) {
+      overlapPenalty += (usedNumbers.get(n) || 0) * 2;
+    }
+    if (usedPbs.has(candidate.powerball)) overlapPenalty += 5;
+
+    const diversityScore = candidate.finalScore - overlapPenalty;
+    if (selected.length > 0 && diversityScore < candidate.finalScore * 0.3) continue;
+
+    selected.push(candidate);
+    usedPbs.add(candidate.powerball);
+    for (const n of candidate.numbers) {
+      usedNumbers.set(n, (usedNumbers.get(n) || 0) + 1);
+    }
+  }
+
+  while (selected.length < count && candidatePool.length > selected.length) {
+    const remaining = candidatePool.filter(c => !selected.includes(c));
+    if (remaining.length === 0) break;
+    selected.push(remaining[0]);
+  }
+
+  return selected.map((c, i) => ({ ...c, rank: i + 1 }));
+}
+
+function generateAntiPopularCards(count: number): GeneratedPick[] {
+  const candidates: GeneratedPick[] = [];
+  const seen = new Set<string>();
+
+  for (let attempt = 0; attempt < count * 100 && candidates.length < count * 5; attempt++) {
+    const card = generateRandomCard();
+    const pb = Math.floor(Math.random() * 13) + 8;
+    const key = card.join(",") + ":" + pb;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const { score: antiPop, breakdown } = scoreAntiPopularity(card, pb);
+    candidates.push({
+      rank: 0,
+      numbers: card,
+      powerball: pb,
+      drawFit: 0,
+      antiPop: Math.round(antiPop),
+      finalScore: Math.round(antiPop * 10) / 10,
+      antiPopBreakdown: breakdown,
+    });
+  }
+
+  candidates.sort((a, b) => b.finalScore - a.finalScore);
+  return candidates.slice(0, count).map((c, i) => ({ ...c, rank: i + 1 }));
+}
+
+function generateStructureMatchedCards(draws: Draw[], count: number): GeneratedPick[] {
+  const freqs = computeNumberFrequencies(draws);
+  const scored = freqs.map(f => ({
+    number: f.number,
+    score: f.last25Freq * 2 + f.last10Freq * 3 - f.drawsSinceSeen * 0.5 + f.rollingTrend * 2,
+  }));
+
+  const candidates: GeneratedPick[] = [];
+  const seen = new Set<string>();
+
+  for (let attempt = 0; attempt < count * 50 && candidates.length < count * 3; attempt++) {
+    const card = generateStructureMatchedCard(draws);
+    const pb = Math.floor(Math.random() * 20) + 1;
+    const key = card.join(",") + ":" + pb;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const drawFit = computeDrawFitScore(card, scored);
+    const { score: antiPop, breakdown } = scoreAntiPopularity(card, pb);
+    const finalScore = (drawFit * 60 + antiPop * 40) / 100;
+
+    candidates.push({
+      rank: 0,
+      numbers: card,
+      powerball: pb,
+      drawFit: Math.round(drawFit),
+      antiPop: Math.round(antiPop),
+      finalScore: Math.round(finalScore * 10) / 10,
+      antiPopBreakdown: breakdown,
+    });
+  }
+
+  candidates.sort((a, b) => b.finalScore - a.finalScore);
+  return candidates.slice(0, count).map((c, i) => ({ ...c, rank: i + 1 }));
+}
+
+function generateLeastDrawnCards(draws: Draw[], windowSize: number, count: number): GeneratedPick[] {
+  const window = draws.slice(0, Math.min(windowSize, draws.length));
+  if (window.length === 0) return [];
+
+  const mainCounts: { number: number; count: number; lastSeen: number }[] = [];
+  for (let n = 1; n <= 35; n++) {
+    let count = 0;
+    let lastSeen = window.length;
+    for (let i = 0; i < window.length; i++) {
+      if ((window[i].numbers as number[]).includes(n)) {
+        count++;
+        if (i < lastSeen) lastSeen = i;
+      }
+    }
+    mainCounts.push({ number: n, count, lastSeen });
+  }
+  mainCounts.sort((a, b) => a.count - b.count || b.lastSeen - a.lastSeen || a.number - b.number);
+
+  const pbCounts: { number: number; count: number; lastSeen: number }[] = [];
+  for (let n = 1; n <= 20; n++) {
+    let count = 0;
+    let lastSeen = window.length;
+    for (let i = 0; i < window.length; i++) {
+      if (window[i].powerball === n) {
+        count++;
+        if (i < lastSeen) lastSeen = i;
+      }
+    }
+    pbCounts.push({ number: n, count, lastSeen });
+  }
+  pbCounts.sort((a, b) => a.count - b.count || b.lastSeen - a.lastSeen || a.number - b.number);
+
+  const mainPool = Math.min(18, mainCounts.length);
+  const pbPool = Math.min(10, pbCounts.length);
+  const candidates: GeneratedPick[] = [];
+  const seen = new Set<string>();
+
+  for (let attempt = 0; attempt < count * 30 && candidates.length < count; attempt++) {
+    let card: number[];
+    let pb: number;
+
+    if (attempt === 0) {
+      card = mainCounts.slice(0, 7).map(m => m.number).sort((a, b) => a - b);
+      pb = pbCounts[0]?.number ?? 1;
+    } else {
+      const poolSlice = mainCounts.slice(0, mainPool);
+      const weights = poolSlice.map((m, i) => ({ number: m.number, score: mainPool - i + (mainPool - m.count) }));
+      card = weightedSample(weights, 7);
+      const pbIdx = Math.floor(Math.random() * Math.min(pbPool, pbCounts.length));
+      pb = pbCounts[pbIdx]?.number ?? 1;
+    }
+
+    const key = card.join(",") + ":" + pb;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const { score: antiPop, breakdown } = scoreAntiPopularity(card, pb);
+    const topMainSet = new Set(mainCounts.slice(0, 7).map(m => m.number));
+    const overlapCount = card.filter(n => topMainSet.has(n)).length;
+    const drawFit = Math.round((overlapCount / 7) * 100);
+    const finalScore = (drawFit * 60 + antiPop * 40) / 100;
+
+    candidates.push({
+      rank: 0,
+      numbers: card,
+      powerball: pb,
+      drawFit,
+      antiPop: Math.round(antiPop),
+      finalScore: Math.round(finalScore * 10) / 10,
+      antiPopBreakdown: breakdown,
+    });
+  }
+
+  candidates.sort((a, b) => b.finalScore - a.finalScore);
+  return candidates.slice(0, count).map((c, i) => ({ ...c, rank: i + 1 }));
+}
+
 function generateStructureAwareCard(draws: Draw[]): number[] {
   if (draws.length < 5) return generateRandomCard();
 
@@ -895,7 +1281,7 @@ export function scoreAntiPopularity(numbers: number[], powerball: number): { sco
   };
 }
 
-export { generateMostDrawnCards };
+export { generateMostDrawnCards, generateAntiPopularCards, generateDiverseCards, generateStructureMatchedCards, generateLeastDrawnCards };
 
 export function generateRankedPicks(
   draws: Draw[],

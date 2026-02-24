@@ -124,7 +124,7 @@ export interface BenchmarkSummary {
   overallVerdict: string;
 }
 
-export type GeneratorMode = "balanced" | "anti_popular" | "pattern_only" | "random_baseline" | "most_drawn_all_time" | "most_drawn_last_50" | "most_drawn_last_100";
+export type GeneratorMode = "balanced" | "anti_popular" | "pattern_only" | "random_baseline" | "most_drawn_all_time" | "most_drawn_last_50" | "most_drawn_last_100" | "most_drawn_last_20" | "least_drawn_last_50" | "structure_matched_random" | "anti_popular_only" | "diversity_optimized";
 
 export interface GeneratorConfig {
   mode: GeneratorMode;

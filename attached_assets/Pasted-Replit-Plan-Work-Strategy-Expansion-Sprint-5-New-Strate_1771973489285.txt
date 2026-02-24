@@ -1,0 +1,410 @@
+Replit Plan Work — Strategy Expansion Sprint (5 New Strategies)
+Sprint Goal
+
+Add 5 new generator/validation strategies to PB-Pattern-Lab and benchmark them across multi-window walk-forward validation:
+
+most_drawn_last_20
+
+least_drawn_last_50
+
+structure_matched_random
+
+anti_popular_only
+
+diversity_optimized
+
+Task 1 — Add shared strategy types and enums
+Scope
+
+Update shared types/schema so the new strategies are valid everywhere (API requests, generator config, validation config, recommendation engine).
+
+Files
+
+shared/schema.ts (and any related shared types files)
+
+Add enum values
+
+most_drawn_last_20
+
+least_drawn_last_50
+
+structure_matched_random
+
+anti_popular_only
+
+diversity_optimized
+
+Acceptance criteria
+
+New strategy values compile in frontend + backend
+
+Validation API accepts them
+
+Generator API accepts them
+
+UI dropdowns/types do not error
+
+Task 2 — Implement most_drawn_last_20 strategy
+Scope
+
+Add a short-window frequency strategy using only the last 20 training draws.
+
+Logic
+
+Training draws only (no leakage)
+
+Use trainDraws.slice(-20)
+
+Count main number frequencies (1–35)
+
+Count Powerball frequencies (PB range in your rules)
+
+Rank by descending count
+
+Deterministic tie-breakers (count desc, recency desc, number asc)
+
+Generate top 10 cards using existing candidate/generator pipeline
+
+Acceptance criteria
+
+Strategy returns valid top 10 cards
+
+Cards use only training data counts
+
+Appears in Generator page selector
+
+Appears in Validation benchmark results
+
+Diagnostics include diversity metrics
+
+Task 3 — Implement least_drawn_last_50 strategy (contrarian baseline)
+Scope
+
+Add a contrarian benchmark using least frequent numbers from the last 50 training draws.
+
+Logic
+
+Use trainDraws.slice(-50)
+
+Rank numbers by ascending frequency (least drawn first)
+
+Tie-break deterministically
+
+Generate top 10 cards
+
+Keep diversity controls active (don’t collapse into near-identical cards)
+
+Why this matters
+
+This tests whether “cold numbers” perform any better/worse than “hot numbers” and strengthens your benchmark suite.
+
+Acceptance criteria
+
+Strategy returns valid cards
+
+Included in validation benchmark and generator mode list
+
+Delta vs random is shown in validation results
+
+No leakage in walk-forward backtests
+
+Task 4 — Implement structure_matched_random strategy
+Scope
+
+Add a random strategy constrained by historically common draw structure.
+
+Logic (v1)
+
+Use training draws to estimate typical structure ranges/distributions:
+
+odd/even count
+
+low/high split
+
+sum range (e.g., central quantile band)
+
+spread/range
+
+consecutive count cap (optional)
+
+decade distribution heuristic (optional v2)
+
+Generate random candidate cards, then score/filter by structural fit:
+
+Keep cards that match common structure
+
+Rank by structure-fit score
+
+Return top 10
+
+Notes
+
+This is a better baseline than plain random because it controls for draw “shape.”
+
+Acceptance criteria
+
+Valid top 10 cards returned
+
+Validation shows it as a separate benchmark row
+
+Summary table includes delta vs plain random
+
+Strategy is reproducible (same seed/config => same output if you support seeding)
+
+Task 5 — Implement anti_popular_only strategy (formal benchmark strategy)
+Scope
+
+Promote anti-popularity scoring into a standalone strategy that can be validated against random.
+
+Logic
+
+Score cards only by anti-popularity heuristics (no draw-fit signal):
+
+penalty for many numbers in 1..31 (birthday bias)
+
+sequence penalty (e.g., 1-2-3, long runs)
+
+repeated ending-digit penalty
+
+symmetry / neat-pattern penalty (simple heuristics)
+
+optional “human-like card” score inversion
+
+Output:
+
+top 10 lowest predicted popularity cards (or highest anti-pop score)
+
+Why this matters
+
+Even if predictive edge is absent, this may be your strongest practical mode.
+
+Acceptance criteria
+
+Strategy appears in Generator + Validation
+
+Validation benchmark can compare it vs random (even if predictive score is neutral)
+
+Generator shows anti-popularity breakdown/explanation for cards
+
+Recommendation engine can choose this mode when no predictive edge exists
+
+Task 6 — Implement diversity_optimized strategy
+Scope
+
+Add a strategy that optimizes coverage/diversity across the top 10 generated cards.
+
+Logic (v1)
+
+Start from a base candidate pool (random, structure-matched, or composite-lite), then apply diversity penalties during selection:
+
+penalize repeated Powerball values across selected top 10
+
+penalize excessive overlap in main numbers with already selected cards
+
+encourage wider number coverage across the set
+
+maintain card validity + score quality threshold
+
+Think of it as:
+
+generate many candidates
+
+greedily select 10 cards maximizing (score - overlap penalty)
+
+Why this matters
+
+Very useful for users buying multiple tickets.
+
+Acceptance criteria
+
+Returns 10 valid cards
+
+Diversity metrics improve vs non-diversity strategies:
+
+more unique PBs
+
+lower average overlap
+
+more unique mains across top 10
+
+Included in validation benchmark + generator selector
+
+Task 7 — Integrate all 5 strategies into benchmark validation (multi-window)
+Scope
+
+Ensure all new strategies run in the same benchmark framework as existing ones.
+
+Validation windows
+
+20
+
+40
+
+60
+
+100 (if data permits)
+
+Metrics (minimum)
+
+mean best main matches
+
+mean best total score
+
+Powerball hit rate
+
+avg total score (top 10)
+
+diversity metrics
+
+delta vs random
+
+Additional benchmark comparison
+
+Also compute delta vs:
+
+structure_matched_random (for advanced comparison ladder)
+
+Acceptance criteria
+
+All 5 strategies appear in benchmark results for all eligible windows
+
+No strategy crashes the validation run
+
+Deltas vs random are computed for all rows
+
+Stability classification includes new strategies
+
+Task 8 — Update recommendation engine to support new strategies
+Scope
+
+Make generator recommendation logic aware of the new strategy set.
+
+Rules to add (v1)
+
+If no predictive edge: recommend anti_popular_only or balanced
+
+If structure-aware baseline dominates but no predictive edge: recommend structure_matched_random (or Balanced)
+
+If diversity is poor across top 10: suggest diversity_optimized
+
+Acceptance criteria
+
+Recommendation endpoint returns valid recommendation when these strategies are present
+
+Generator recommendation panel can display any new strategy/mode
+
+“Apply Recommendation” correctly sets generator controls
+
+Task 9 — Update Generator UI and Validation UI
+Scope
+
+Expose the new strategies in the app interface.
+
+Generator page
+
+Add selectable options:
+
+Most Drawn (Last 20)
+
+Least Drawn (Last 50)
+
+Structure-Matched Random
+
+Anti-Popular Only
+
+Diversity Optimized
+
+Validation page
+
+Ensure benchmark tables and filters include all new strategies.
+
+Acceptance criteria
+
+All new strategies visible and selectable in UI
+
+Labels are user-friendly (not raw enum names only)
+
+Validation results render without layout breaking
+
+Recommendation panel and dropdown labels stay consistent
+
+Task 10 — Update replit.md documentation
+Scope
+
+Document the new strategies and benchmark methodology updates.
+
+Add sections
+
+New strategy list + descriptions
+
+Benchmark comparison ladder (random vs structure-random vs predictive)
+
+Recommendation logic updates (when anti-popular/diversity modes are recommended)
+
+Acceptance criteria
+
+replit.md accurately reflects implemented strategy set
+
+Generator and validation docs match actual UI behavior
+
+No outdated strategy counts/mode counts remain
+
+Suggested Implementation Order (fastest / safest)
+
+Do these in this order to avoid UI thrash:
+
+Task 1 (shared enums/types)
+
+Task 2 + Task 3 (easy frequency baselines)
+
+Task 4 (structure baseline)
+
+Task 5 (anti-popular-only)
+
+Task 6 (diversity optimized)
+
+Task 7 (benchmark integration)
+
+Task 8 (recommendation logic)
+
+Task 9 (UI)
+
+Task 10 (replit.md)
+
+Acceptance Test Checklist (end of sprint)
+
+Run this before calling it done:
+
+Generator tests
+
+ Each new strategy generates 10 valid cards
+
+ No duplicates in a card (main numbers)
+
+ Powerball ranges valid
+
+ Diversity strategy improves PB/main spread in top 10
+
+Validation tests
+
+ Benchmark runs across 20/40/60 windows (100 if enough data)
+
+ All strategies appear in table
+
+ Deltas vs random populate correctly
+
+ Stability classification updates for new strategies
+
+Recommendation tests
+
+ No-edge case recommends anti-popular or balanced
+
+ Recommendation panel displays reason/evidence
+
+ Apply Recommendation updates generator settings
+
+Documentation tests
+
+ replit.md reflects new strategy count and labels
+
+ API docs list any new endpoint/response fields

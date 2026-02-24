@@ -11,6 +11,10 @@ import {
   runBenchmarkValidation,
   generateRankedPicks,
   generateMostDrawnCards,
+  generateAntiPopularCards,
+  generateDiverseCards,
+  generateStructureMatchedCards,
+  generateLeastDrawnCards,
   storeBenchmarkResult,
   getGeneratorRecommendation,
 } from "./analysis";
@@ -193,9 +197,29 @@ export async function registerRoutes(
         return res.status(400).json({ ok: false, message: "No draws available. Upload data first." });
       }
 
-      if (mode === "most_drawn_all_time" || mode === "most_drawn_last_50" || mode === "most_drawn_last_100") {
-        const windowSize = mode === "most_drawn_last_50" ? 50 : mode === "most_drawn_last_100" ? 100 : draws.length;
+      if (mode === "most_drawn_all_time" || mode === "most_drawn_last_50" || mode === "most_drawn_last_100" || mode === "most_drawn_last_20") {
+        const windowSize = mode === "most_drawn_last_20" ? 20 : mode === "most_drawn_last_50" ? 50 : mode === "most_drawn_last_100" ? 100 : draws.length;
         const picks = generateMostDrawnCards(draws, windowSize, count);
+        return res.json(apiResponse(draws, picks));
+      }
+
+      if (mode === "least_drawn_last_50") {
+        const picks = generateLeastDrawnCards(draws, 50, count);
+        return res.json(apiResponse(draws, picks));
+      }
+
+      if (mode === "structure_matched_random") {
+        const picks = generateStructureMatchedCards(draws, count);
+        return res.json(apiResponse(draws, picks));
+      }
+
+      if (mode === "anti_popular_only") {
+        const picks = generateAntiPopularCards(count);
+        return res.json(apiResponse(draws, picks));
+      }
+
+      if (mode === "diversity_optimized") {
+        const picks = generateDiverseCards(draws, count);
         return res.json(apiResponse(draws, picks));
       }
 

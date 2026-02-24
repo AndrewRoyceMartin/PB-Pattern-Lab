@@ -20,6 +20,11 @@ const STRATEGY_DESCRIPTIONS: Record<string, string> = {
   "Most Drawn (All-Time)": "Picks the 7 most frequently drawn numbers across the entire dataset. A simple frequency benchmark — does historical popularity predict future draws?",
   "Most Drawn (Last 50)": "Picks the 7 most frequent numbers from the last 50 draws only. Tests whether recent frequency trends outperform long-term averages.",
   "Most Drawn (Last 100)": "Picks the 7 most frequent numbers from the last 100 draws. A mid-range frequency window between all-time and short-term.",
+  "Most Drawn (Last 20)": "Short-window hot numbers — picks the 7 most frequent numbers from only the last 20 draws. Tests whether very recent trends carry predictive weight.",
+  "Least Drawn (Last 50)": "Contrarian strategy — picks the 7 least frequently drawn numbers from the last 50 draws. Tests whether \"cold\" numbers are overdue for a return.",
+  "Structure-Matched Random": "Random picks constrained to match historical draw structure (odd/even count, sum range, low/high split, spread). A better baseline than plain random because it controls for draw shape.",
+  "Anti-Popular Only": "Pure anti-popularity scoring with no pattern signals. Picks numbers that minimize birthday bias, sequences, repeated endings, and aesthetic patterns. Your strongest practical mode for reducing split-risk.",
+  "Diversity Optimized": "Optimizes number coverage across the top 10 cards. Penalizes repeated Powerballs and excessive main-number overlap between cards. Ideal for multi-ticket buyers wanting maximum coverage.",
 };
 
 function StrategyName({ name, className }: { name: string; className?: string }) {

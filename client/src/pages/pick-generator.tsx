@@ -25,10 +25,15 @@ function Tip({ label, tip, className }: { label: string; tip: string; className?
 const MODES: { value: GeneratorMode; label: string; description: string; drawFit: number; antiPop: number; group?: string; strategyName?: string }[] = [
   { value: "balanced", label: "Balanced", description: "60% pattern signals, 40% anti-popularity", drawFit: 60, antiPop: 40, strategyName: "Composite" },
   { value: "anti_popular", label: "Low Split-Risk", description: "20% pattern, 80% anti-popularity", drawFit: 20, antiPop: 80 },
+  { value: "anti_popular_only", label: "Anti-Popular Only", description: "Pure anti-popularity scoring — maximum split-risk reduction", drawFit: 0, antiPop: 100, strategyName: "Anti-Popular Only" },
   { value: "pattern_only", label: "Experimental Pattern", description: "100% pattern signals (experimental)", drawFit: 100, antiPop: 0 },
+  { value: "structure_matched_random", label: "Structure-Matched Random", description: "Random picks filtered by historical draw structure (odd/even, sum, range)", drawFit: 60, antiPop: 40, strategyName: "Structure-Matched Random" },
+  { value: "diversity_optimized", label: "Diversity Optimized", description: "Maximizes number coverage across top 10 cards — ideal for multi-ticket buyers", drawFit: 50, antiPop: 50, strategyName: "Diversity Optimized" },
   { value: "most_drawn_all_time", label: "Most Drawn (All-Time)", description: "Top frequency numbers from full history", drawFit: 100, antiPop: 0, group: "frequency", strategyName: "Most Drawn (All-Time)" },
-  { value: "most_drawn_last_50", label: "Most Drawn (Last 50)", description: "Top frequency from last 50 draws", drawFit: 100, antiPop: 0, group: "frequency", strategyName: "Most Drawn (Last 50)" },
   { value: "most_drawn_last_100", label: "Most Drawn (Last 100)", description: "Top frequency from last 100 draws", drawFit: 100, antiPop: 0, group: "frequency", strategyName: "Most Drawn (Last 100)" },
+  { value: "most_drawn_last_50", label: "Most Drawn (Last 50)", description: "Top frequency from last 50 draws", drawFit: 100, antiPop: 0, group: "frequency", strategyName: "Most Drawn (Last 50)" },
+  { value: "most_drawn_last_20", label: "Most Drawn (Last 20)", description: "Top frequency from last 20 draws — short-window hot numbers", drawFit: 100, antiPop: 0, group: "frequency", strategyName: "Most Drawn (Last 20)" },
+  { value: "least_drawn_last_50", label: "Least Drawn (Last 50)", description: "Contrarian — picks the coldest numbers from last 50 draws", drawFit: 100, antiPop: 0, group: "frequency", strategyName: "Least Drawn (Last 50)" },
   { value: "random_baseline", label: "Random Baseline", description: "Pure random for comparison", drawFit: 0, antiPop: 0, strategyName: "Random" },
 ];
 
