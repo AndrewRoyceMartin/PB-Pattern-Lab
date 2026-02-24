@@ -56,6 +56,7 @@ export async function runBenchmark(windowSizes: number[] = [20, 40, 60, 100], mi
   if (!res.ok || !json.ok) {
     throw new Error(json.message || "Benchmark failed");
   }
+  queryClient.invalidateQueries({ queryKey: ["/api/generator/recommendation"] });
   return json.data;
 }
 

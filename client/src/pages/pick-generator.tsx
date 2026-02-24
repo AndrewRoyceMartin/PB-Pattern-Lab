@@ -65,6 +65,8 @@ export default function PickGenerator() {
     queryKey: ["/api/generator/recommendation"],
     queryFn: fetchRecommendation,
     enabled: !!stats?.modernDraws,
+    staleTime: 0,
+    refetchOnMount: "always",
   });
   const hasData = stats?.modernDraws > 0;
 
