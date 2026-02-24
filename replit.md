@@ -7,7 +7,18 @@ Powerball Pattern Lab is a full-stack web application for Australian Powerball l
 The app follows a monorepo structure with three main directories:
 - `client/` — React SPA frontend
 - `server/` — Express API backend
-- `shared/` — Shared TypeScript types and database schema
+- `shared/` — Shared TypeScript types, database schema, and typed DTOs
+
+## Recent Changes
+
+- **2026-02-24**: Major refactor implementing benchmark-first architecture:
+  - Added typed DTOs in `shared/schema.ts` (NumberFrequency, PatternFeatureRow, AuditSummary, StrategyResult, ValidationSummary, RollingWindow, GeneratorConfig, GeneratedPick with AntiPopularityBreakdown, ApiResponse wrapper)
+  - Refactored `server/analysis.ts` into 3 engines: Pattern Discovery, Validation (walk-forward with verdict classification), Generator (mode-based with anti-popularity breakdown)
+  - Added randomness audit (chi-square + entropy analysis)
+  - Standardized all API responses to `{ok, meta, data}` format
+  - Added `/api/analysis/audit` endpoint
+  - Generator supports 4 modes: balanced, anti_popular, pattern_only, random_baseline
+  - Rebuilt all 5 frontend pages with improved UX
 
 ## User Preferences
 
@@ -18,11 +29,11 @@ Preferred communication style: Simple, everyday language.
 ### Frontend
 - **Framework**: React with TypeScript, using Vite as the build tool
 - **Routing**: Wouter (lightweight client-side router) with 5 main pages:
-  - `/` — Dashboard (system overview, stats summary)
+  - `/` — Dashboard (system overview, verdict summary, recent draws, strategy benchmarks)
   - `/ingest` — CSV file upload for importing Powerball draw data
-  - `/patterns` — Pattern Lab (frequency analysis, structure features, randomness auditing)
-  - `/validation` — Walk-forward backtest results and strategy comparison
-  - `/generator` — Pick generation with configurable draw-fit vs anti-popularity weighting
+  - `/patterns` — Pattern Lab (frequency analysis, structure features, randomness audit with chi-square/entropy)
+  - `/validation` — Walk-forward backtest with verdict classification, strategy comparison, rolling windows, diagnostics
+  - `/generator` — Pick generation with 4 modes (Balanced, Low Split-Risk, Experimental Pattern, Random Baseline), anti-popularity breakdown
 - **UI Components**: shadcn/ui (new-york style) built on Radix UI primitives with Tailwind CSS
 - **State Management**: TanStack React Query for server state; local React state for UI
 - **Styling**: Tailwind CSS v4 with CSS variables for theming; dark mode by default for a "lab" aesthetic
@@ -32,16 +43,20 @@ Preferred communication style: Simple, everyday language.
 ### Backend
 - **Runtime**: Node.js with Express
 - **Language**: TypeScript, executed via `tsx` in development
-- **API Pattern**: RESTful JSON API under `/api/` prefix
+- **API Pattern**: RESTful JSON API under `/api/` prefix, standardized `{ok, meta, data}` response format
 - **Key Endpoints**:
   - `POST /api/upload` — CSV file upload (multer, memory storage, 10MB limit)
   - `GET /api/stats` — Draw count and dataset summary
-  - `GET /api/draws` — All draws ordered by draw number
-  - `GET /api/analysis/frequencies` — Number frequency analysis
+  - `GET /api/draws` — All modern draws ordered by draw number
+  - `GET /api/analysis/frequencies` — Number frequency analysis (L10, L25, L50 windows)
   - `GET /api/analysis/features` — Structure and carryover feature extraction
-  - `GET /api/analysis/validation` — Walk-forward backtest results
-  - `POST /api/generate` — Generate ranked picks with configurable weights
-- **Analysis Engine** (`server/analysis.ts`): Pure TypeScript computation for frequency analysis, structure features, carryover detection, walk-forward validation, and pick generation
+  - `GET /api/analysis/audit` — Randomness audit (chi-square + entropy)
+  - `GET /api/analysis/validation` — Walk-forward backtest with verdict classification
+  - `POST /api/generate` — Generate ranked picks with mode selection and configurable weights
+- **Analysis Engine** (`server/analysis.ts`): Three engines:
+  - Engine A (Pattern Discovery): frequency, structure, carryover, rolling drift
+  - Engine B (Validation): walk-forward backtest with 5 strategies (Random, Frequency, Recency, Structure-Aware, Composite), rolling windows, verdict classification (no_edge/weak_edge/possible_edge/insufficient_data)
+  - Engine C (Generator): ranked picks with draw-fit scoring, anti-popularity penalties (birthday, sequence, endings, aesthetic, low PB), mode-based generation
 - **Dev Server**: Vite middleware is integrated into Express for HMR during development
 - **Production Build**: Vite builds the client; esbuild bundles the server into `dist/index.cjs`
 
@@ -66,6 +81,8 @@ Preferred communication style: Simple, everyday language.
 3. **CSV-based data import**: Rather than scraping or API integration, users upload CSV files of historical draws. The server parses and normalizes them, filtering for the modern 7+1 format.
 4. **Server-side analysis**: All statistical computation happens on the server to keep the client lightweight. The client simply fetches and displays results.
 5. **Walk-forward validation**: Backtesting uses walk-forward methodology to avoid look-ahead bias when evaluating pattern strategies.
+6. **Benchmark-first design**: Validation is the gatekeeper — what doesn't beat random doesn't influence the generator. The anti-popularity engine provides practical value even when no predictive edge exists.
+7. **Standardized API responses**: All endpoints return `{ok, meta, data}` format for consistent client consumption.
 
 ## External Dependencies
 
