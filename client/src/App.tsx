@@ -11,6 +11,7 @@ import Ingest from "@/pages/ingest";
 import PatternLab from "@/pages/pattern-lab";
 import Validation from "@/pages/validation";
 import PickGenerator from "@/pages/pick-generator";
+import FormulaLab from "@/pages/formula-lab";
 
 function Router() {
   return (
@@ -21,6 +22,7 @@ function Router() {
         <Route path="/patterns" component={PatternLab}/>
         <Route path="/validation" component={Validation}/>
         <Route path="/generator" component={PickGenerator}/>
+        <Route path="/formula-lab" component={FormulaLab}/>
         <Route component={NotFound} />
       </Switch>
     </Layout>

@@ -21,6 +21,7 @@ import {
   storeBenchmarkResult,
   getGeneratorRecommendation,
 } from "./analysis";
+import { runFormulaOptimizer } from "./formula-lab";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
@@ -253,6 +254,40 @@ export async function registerRoutes(
 
       const picks = generateRankedPicks(draws, count, drawFitWeight, antiPopWeight);
       res.json(apiResponse(draws, picks));
+    } catch (error: any) {
+      res.status(500).json({ ok: false, message: error.message });
+    }
+  });
+
+  app.post("/api/formula-lab/optimize", async (req, res) => {
+    try {
+      const draws = await storage.getModernDraws();
+      if (draws.length < 50) {
+        return res.status(400).json({ ok: false, message: "Need at least 50 modern draws for Formula Lab optimization." });
+      }
+
+      const {
+        features = {
+          freqTotal: true, freqL50: true, freqL20: false,
+          recencySinceSeen: true, trendL10: true,
+          structureFit: true, carryoverAffinity: true, antiPopularity: false,
+        },
+        trainingWindowSize = Math.min(200, Math.floor(draws.length * 0.7)),
+        searchIterations = 200,
+        regularizationStrength = 0.5,
+        objective = "mean_best_score",
+      } = req.body || {};
+
+      const config = {
+        features,
+        trainingWindowSize,
+        searchIterations: Math.min(searchIterations, 500),
+        regularizationStrength,
+        objective,
+      };
+
+      const result = runFormulaOptimizer(draws, config);
+      res.json(apiResponse(draws, result));
     } catch (error: any) {
       res.status(500).json({ ok: false, message: error.message });
     }

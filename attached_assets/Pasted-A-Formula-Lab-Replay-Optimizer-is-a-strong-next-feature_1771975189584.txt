@@ -1,0 +1,419 @@
+A Formula Lab / Replay Optimizer is a strong next feature as long as the app clearly separates:
+
+Retrospective fit (explains past draws; can overfit)
+
+Walk-forward replay (tests whether it generalizes)
+
+Statistical validation (permutation / Monte Carlo to check if “edge” is beyond chance)
+
+That caveat is not optional — it should be built into the UI and output.
+
+Replit Plan — Formula Lab / Replay Optimizer (with proper caveats)
+What this module does
+
+It searches for a weighted scoring formula that performs well on historical data, then replays it chronologically on unseen draws.
+
+Core outputs
+
+Best-fit formula weights (in-sample)
+
+Out-of-sample replay performance
+
+Delta vs random
+
+Stability across windows
+
+Overfit risk flags
+
+Clear caveated verdict
+
+Mandatory caveats to build into the feature (UI + API)
+Caveat 1 — Retrospective fit is not evidence of prediction
+
+Display this prominently:
+
+“A formula can fit historical draws in hindsight. Only walk-forward replay and benchmark comparison indicate whether the relationship generalizes.”
+
+Caveat 2 — No guarantee of future winnings
+
+Display:
+
+“Results are experimental statistical analysis and do not guarantee future outcomes.”
+
+Caveat 3 — Edge claims require significance checks
+
+Display:
+
+“Any apparent edge should be tested against random baselines and permutation/Monte Carlo controls.”
+
+Permutation/Monte Carlo methods are standard ways to test whether observed performance could arise by chance.
+
+Caveat 4 — Data scope matters
+
+Display:
+
+“Results depend on the selected date range / rule era / data quality.”
+
+Module design (high level)
+A) Formula Designer (feature + weight selection)
+
+User chooses:
+
+feature set (frequency, recency, trend, carryover, structure, anti-popularity, etc.)
+
+training window size
+
+optimization target (e.g., best total score, avg top-10 score, stability-weighted score)
+
+constraints (max weights, regularization strength)
+
+B) Optimizer
+
+Searches for weights that maximize the chosen objective on training data.
+
+Start simple
+
+Use:
+
+grid search / random search over weight ranges
+
+small constrained search space
+
+regularization penalty
+
+This is easier to debug and less likely to overfit than fancy ML initially.
+
+C) Walk-Forward Replay Engine
+
+Replays the selected/optimized formula across future draws using chronological splits only.
+
+Must enforce
+
+no leakage
+
+train before test only
+
+same scoring rules as validation benchmark
+
+D) Benchmark & Significance Layer
+
+Compares formula against:
+
+random
+
+structure_matched_random
+
+most_drawn variants
+
+composite
+
+anti_popular_only (practical mode)
+
+Then optionally runs:
+
+permutation test (shuffle outcomes / break feature-label relationship)
+
+Monte Carlo null baselines
+
+Backtest overfitting risk is a known problem in strategy research, and explicitly testing for it is good practice.
+
+E) Caveated Report
+
+Produces a plain-English summary with:
+
+fit quality
+
+replay quality
+
+overfit risk flags
+
+confidence classification
+
+recommended next action
+
+Replit “Plan Work” tasks (copy/paste)
+Task 1 — Create Formula Lab shared types and schemas
+
+Add shared DTOs for formula features, weight sets, optimizer config, replay config, and results
+
+Include explicit fields for retrospectiveFit, walkForwardReplay, deltaVsRandom, overfitRisk, and caveats
+
+Add schema support for date scope / era filters and validation metadata
+
+Acceptance criteria
+
+Frontend and backend compile with new Formula Lab types
+
+API can validate Formula Lab requests and responses
+
+Result schema includes caveat text/flags fields
+
+Task 2 — Build formula scoring engine (weighted feature score)
+
+Implement a reusable weighted scoring engine for numbers/cards using existing feature telemetry (frequency, recency, trend, carryover, structure, etc.)
+
+Support configurable feature toggles and weights
+
+Add regularization/complexity penalty term to discourage overfitting
+
+Return score breakdowns for explainability
+
+Acceptance criteria
+
+Formula scorer produces deterministic scores for same inputs/config
+
+Score breakdown is returned for debugging/UI display
+
+Complexity penalty is configurable and visible in diagnostics
+
+Task 3 — Build retrospective optimizer (fit-on-history mode)
+
+Add optimizer to search for weight sets that maximize a chosen in-sample objective
+
+Start with constrained random search or grid search (small/medium search spaces)
+
+Record top-N candidate formulas and optimization diagnostics
+
+Label all outputs explicitly as retrospective fit (not predictive evidence)
+
+Acceptance criteria
+
+Optimizer returns ranked candidate formulas with scores
+
+Output includes feature weights, objective score, and complexity penalty
+
+UI/API labels retrospective fit clearly with caveat flag
+
+Task 4 — Build walk-forward replay engine for optimized formulas
+
+Replay optimized formula chronologically using train-then-test splits only
+
+Evaluate top-10 generated cards on each test draw
+
+Compare performance to benchmark strategies under same scoring metrics
+
+Support multi-window replay (20/40/60/100 where available)
+
+Acceptance criteria
+
+No-leakage replay confirmed (test draw excluded from training)
+
+Replay results returned by window and overall
+
+Delta vs random and stability summary included
+
+Formula can be replayed with fixed weights and re-optimized-per-window modes (if configured)
+
+Task 5 — Add overfit risk diagnostics and caveated verdicts
+
+Add overfit indicators such as:
+
+large in-sample vs out-of-sample gap
+
+unstable weights across windows
+
+inconsistent delta vs random
+
+high complexity / low generalization ratio
+
+Classify outcomes (e.g., overfit_likely / inconclusive / weak_signal / possible_signal)
+
+Generate plain-English caveated summaries for UI
+
+Acceptance criteria
+
+Every Formula Lab result includes a caveated verdict and explanation
+
+Overfit risk flags appear even when retrospective fit is strong
+
+UI clearly distinguishes retrospective vs replay performance
+
+Task 6 — Add permutation test (v1) for formula replay significance
+
+Implement a Monte Carlo permutation test that breaks the feature-outcome relationship and reruns replay scoring
+
+Compare observed replay metric vs permuted distribution
+
+Return empirical p-value / percentile and interpretation notes
+
+Label as experimental significance support, not proof of causality
+
+Acceptance criteria
+
+Permutation test runs on selected replay metric (e.g., mean best total score delta vs random)
+
+API returns empirical p-value and null distribution summary
+
+UI displays result with cautionary interpretation text
+
+Task 7 — Build Formula Lab UI page (or section) with explicit caveats
+
+Add controls for feature selection, weight bounds, objective, training window, and replay settings
+
+Show panels for:
+
+Retrospective Fit Results
+
+Walk-Forward Replay Results
+
+Overfit Risk / Caveats
+
+Benchmark Comparison
+
+(Optional) Permutation Test Results
+
+Add persistent caveat banner at top of page
+
+Acceptance criteria
+
+User can run optimizer + replay from UI
+
+Results display separate retrospective and replay sections
+
+Caveat banner and labels are visible before and after runs
+
+Plain-English summary is shown with risk classification
+
+Task 8 — Integrate Formula Lab with recommendation engine (read-only influence first)
+
+Allow recommendation engine to consume Formula Lab replay outcomes only (not retrospective fit alone)
+
+If replay shows no edge, recommendation remains anti_popular/balanced
+
+If replay shows unstable weak signal, recommendation may suggest balanced experimental mode
+
+Do not allow retrospective-only fit to trigger high-confidence recommendations
+
+Acceptance criteria
+
+Recommendation endpoint ignores retrospective-only wins
+
+Recommendation confidence reflects replay stability and overfit flags
+
+UI evidence panel references replay metrics, not just optimizer score
+
+Task 9 — Update replit.md documentation and methodology caveats
+
+Document Formula Lab purpose, architecture, and limitations
+
+Explicitly distinguish retrospective optimization from predictive validation
+
+Describe overfit diagnostics and permutation test interpretation
+
+Add “How to read results” section
+
+Acceptance criteria
+
+replit.md reflects Formula Lab workflow and caveats accurately
+
+No wording implies guaranteed prediction or proven winning formula
+
+Validation and recommendation docs remain consistent with Formula Lab integration
+
+Recommended v1 feature set for Formula Lab (keep it controlled)
+
+Start with a small set of features to reduce complexity and overfitting risk:
+
+Number-level features (v1)
+
+freq_total
+
+freq_l50
+
+freq_l20 (when added)
+
+recency_since_seen
+
+trend_l10_vs_l50
+
+Card-level features (v1)
+
+structure_fit
+
+carryover_from_prev_affinity (light weight)
+
+anti_popularity_score (optional depending on objective)
+
+Skip initially (add later)
+
+pair/triple interaction features
+
+date/astrology features
+
+tree/ML models
+
+too many overlapping frequency windows
+
+Recommended optimization objective (v1)
+
+Use a generalization-aware objective, not just raw in-sample score.
+
+In-sample optimizer objective (v1)
+
+Optimize:
+
+mean_best_total_score (training replay subset)
+minus
+
+complexity_penalty
+
+Final verdict should prioritize
+
+out-of-sample delta vs random
+
+stability across windows
+
+overfit risk flags
+
+This mirrors good anti-overfitting practice: don’t trust a single backtest number without OOS checks and robustness tests.
+
+Caveated result language template (use in UI)
+
+Here’s wording you can use directly in the app:
+
+If retrospective fit is strong but replay is weak
+
+Strong historical fit, weak replay performance.
+The optimizer found a formula that explains past draws in-sample, but it did not outperform benchmark strategies in walk-forward replay. This suggests likely overfitting rather than stable predictive signal.
+
+If replay is slightly positive but unstable
+
+Weak/unstable signal.
+The formula showed small improvements versus random in some windows, but results were inconsistent across replay periods. Treat as experimental and continue testing with permutation/Monte Carlo controls.
+
+If replay is consistently positive (rare)
+
+Possible signal (not confirmed).
+The formula outperformed random in multiple replay windows, but results remain subject to sampling error and overfitting risk. Validate with permutation and Monte Carlo tests before treating this as a meaningful edge.
+
+Important implementation guardrails (must-have)
+
+No leakage: test draw excluded from all training stats/features
+
+Frozen weights for replay mode available (to test generalization)
+
+Re-optimized per window mode clearly labeled as adaptive and less comparable
+
+Track search breadth (how many formulas tried) to contextualize overfit risk
+
+Store seeds/configs for reproducibility
+
+Best first build sequence (fast + safe)
+
+Task 1 shared schemas
+
+Task 2 formula scoring engine
+
+Task 3 retrospective optimizer
+
+Task 4 walk-forward replay
+
+Task 5 overfit/caveated verdicts
+
+Task 7 UI page
+
+Task 6 permutation test
+
+Task 8 recommendation integration
+
+Task 9 docs

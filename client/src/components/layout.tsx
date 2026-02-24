@@ -4,7 +4,8 @@ import {
   TestTubes, 
   CheckCircle2, 
   Dna,
-  LayoutDashboard
+  LayoutDashboard,
+  FlaskConical
 } from "lucide-react";
 
 export function Layout({ children }: { children: React.ReactNode }) {
@@ -16,6 +17,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
     { href: "/patterns", label: "Pattern Lab", icon: TestTubes },
     { href: "/validation", label: "Validation", icon: CheckCircle2 },
     { href: "/generator", label: "Pick Generator", icon: Dna },
+    { href: "/formula-lab", label: "Formula Lab", icon: FlaskConical },
   ];
 
   return (

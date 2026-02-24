@@ -62,6 +62,18 @@ The app follows a monorepo structure with three main directories:
   - All metrics tooltips added to chi-square, entropy, entropy ratio, structure profile values
   - New API endpoints: `GET /api/analysis/structure-profile`; audit endpoint now returns `{main, powerball}` object
   - New shared types: StructureProfile; AuditSummary extended with scope, drawsUsed, interpretation fields; PatternFeatureRow extended with percentile, typicality, normalRange fields
+- **2026-02-24**: Formula Lab / Replay Optimizer module:
+  - New `/formula-lab` page with feature selection, optimizer settings, and results display
+  - Formula scoring engine with weighted features (frequency, recency, trend, structure, carryover, anti-popularity)
+  - Retrospective optimizer using constrained random search with regularization/complexity penalty
+  - Walk-forward replay engine testing optimized formulas across 20/40/60/100-draw windows
+  - Monte Carlo permutation test (100 permutations) for significance checking with empirical p-value
+  - Overfit risk diagnostics: overfit_likely / inconclusive / weak_signal / possible_signal classification
+  - Caveated verdicts with plain-English summaries and persistent caveat banner
+  - All results explicitly label retrospective fit vs walk-forward replay
+  - New API endpoint: `POST /api/formula-lab/optimize`
+  - New server module: `server/formula-lab.ts` (Formula Lab engine)
+  - New shared types: FormulaFeatureConfig, FormulaWeights, FormulaOptimizerConfig, FormulaCandidateResult, FormulaOverfitRisk, FormulaReplayWindow, FormulaReplayResult, FormulaPermutationResult, FormulaLabResult
 
 ## User Preferences
 
@@ -71,12 +83,13 @@ Preferred communication style: Simple, everyday language.
 
 ### Frontend
 - **Framework**: React with TypeScript, using Vite as the build tool
-- **Routing**: Wouter (lightweight client-side router) with 5 main pages:
+- **Routing**: Wouter (lightweight client-side router) with 6 main pages:
   - `/` — Dashboard (system overview, verdict summary, recent draws, strategy benchmarks)
   - `/ingest` — CSV file upload for importing Powerball draw data
   - `/patterns` — Pattern Lab (frequency analysis, structure features, randomness audit with chi-square/entropy)
   - `/validation` — Walk-forward backtest with verdict classification, strategy comparison, rolling windows, diagnostics
   - `/generator` — Pick generation with 12 modes (Balanced, Low Split-Risk, Anti-Popular Only, Experimental Pattern, Structure-Matched Random, Diversity Optimized, Most Drawn All-Time/Last 100/Last 50/Last 20, Least Drawn Last 50, Random Baseline), anti-popularity breakdown
+  - `/formula-lab` — Formula Lab / Replay Optimizer (weighted formula search, walk-forward replay, permutation test, overfit diagnostics)
 - **UI Components**: shadcn/ui (new-york style) built on Radix UI primitives with Tailwind CSS
 - **State Management**: TanStack React Query for server state; local React state for UI
 - **Styling**: Tailwind CSS v4 with CSS variables for theming; dark mode by default for a "lab" aesthetic

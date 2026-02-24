@@ -192,6 +192,100 @@ export interface GeneratorRecommendation {
   hasBenchmark: boolean;
 }
 
+// ── Formula Lab types ──
+
+export interface FormulaFeatureConfig {
+  freqTotal: boolean;
+  freqL50: boolean;
+  freqL20: boolean;
+  recencySinceSeen: boolean;
+  trendL10: boolean;
+  structureFit: boolean;
+  carryoverAffinity: boolean;
+  antiPopularity: boolean;
+}
+
+export interface FormulaWeights {
+  freqTotal: number;
+  freqL50: number;
+  freqL20: number;
+  recencySinceSeen: number;
+  trendL10: number;
+  structureFit: number;
+  carryoverAffinity: number;
+  antiPopularity: number;
+}
+
+export interface FormulaOptimizerConfig {
+  features: FormulaFeatureConfig;
+  trainingWindowSize: number;
+  searchIterations: number;
+  regularizationStrength: number;
+  objective: "mean_best_score" | "avg_top10_score" | "stability_weighted";
+}
+
+export interface FormulaCandidateResult {
+  rank: number;
+  weights: FormulaWeights;
+  inSampleScore: number;
+  complexityPenalty: number;
+  adjustedScore: number;
+  scoreBreakdown: Record<string, number>;
+}
+
+export type FormulaOverfitRisk = "overfit_likely" | "inconclusive" | "weak_signal" | "possible_signal";
+
+export interface FormulaReplayWindow {
+  windowSize: number;
+  testDraws: number;
+  trainDraws: number;
+  avgMainMatches: number;
+  bestMainMatches: number;
+  pbHitRate: number;
+  deltaVsRandom: number;
+  beatsRandom: boolean;
+}
+
+export interface FormulaReplayResult {
+  windows: FormulaReplayWindow[];
+  overallAvgDelta: number;
+  windowsBeating: number;
+  windowsLosing: number;
+  stability: StabilityClass;
+}
+
+export interface FormulaPermutationResult {
+  observedDelta: number;
+  permutationMean: number;
+  permutationStd: number;
+  empiricalPValue: number;
+  percentile: number;
+  permutationsRun: number;
+  interpretation: string;
+}
+
+export interface FormulaLabResult {
+  config: FormulaOptimizerConfig;
+  topCandidates: FormulaCandidateResult[];
+  bestWeights: FormulaWeights;
+  retrospectiveFit: {
+    inSampleScore: number;
+    complexityPenalty: number;
+    adjustedScore: number;
+    trainDrawsUsed: number;
+  };
+  walkForwardReplay: FormulaReplayResult | null;
+  permutationTest: FormulaPermutationResult | null;
+  overfitRisk: FormulaOverfitRisk;
+  caveatedVerdict: string;
+  caveats: string[];
+  benchmarkComparison: {
+    strategy: string;
+    avgDelta: number;
+  }[];
+  timestamp: string;
+}
+
 export interface ApiResponse<T> {
   ok: boolean;
   meta: {
