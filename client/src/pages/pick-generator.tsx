@@ -1,0 +1,125 @@
+import { useState } from "react";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { mockGeneratedPicks } from "@/lib/mock-data";
+import { Button } from "@/components/ui/button";
+import { Slider } from "@/components/ui/slider";
+import { Badge } from "@/components/ui/badge";
+import { Zap, Play, CheckCircle } from "lucide-react";
+
+export default function PickGenerator() {
+  const [antiPopWeight, setAntiPopWeight] = useState([40]);
+  const drawFitWeight = 100 - antiPopWeight[0];
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-end">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Pick Generator</h1>
+          <p className="text-muted-foreground mt-2 font-mono text-sm">
+            Generate ranked picks using validated signals and anti-popularity scoring.
+          </p>
+        </div>
+        <Button className="bg-primary hover:bg-primary/90 text-primary-foreground font-mono font-bold">
+          <Play className="w-4 h-4 mr-2" /> GENERATE (TOP 10)
+        </Button>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-1 space-y-6">
+          <Card className="border-border">
+            <CardHeader>
+              <CardTitle className="text-lg">Generator Strategy</CardTitle>
+              <CardDescription>Adjust composite scoring weights</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="space-y-4">
+                <div className="flex justify-between text-sm font-mono">
+                  <span className="text-primary">Draw-Fit Score</span>
+                  <span className="font-bold text-primary">{drawFitWeight}%</span>
+                </div>
+                <div className="flex justify-between text-sm font-mono">
+                  <span className="text-yellow-500">Anti-Popularity</span>
+                  <span className="font-bold text-yellow-500">{antiPopWeight[0]}%</span>
+                </div>
+                <Slider 
+                  defaultValue={[40]} 
+                  max={100} 
+                  step={10} 
+                  onValueChange={setAntiPopWeight}
+                  className="mt-4"
+                />
+              </div>
+
+              <div className="pt-4 border-t border-border/50">
+                <h4 className="text-xs font-mono font-bold text-muted-foreground mb-3 uppercase tracking-wider">Active Penalties</h4>
+                <div className="space-y-2 font-mono text-xs">
+                  <div className="flex items-center text-muted-foreground">
+                    <CheckCircle className="w-3 h-3 mr-2 text-green-500" /> Birthday concentration (≤31)
+                  </div>
+                  <div className="flex items-center text-muted-foreground">
+                    <CheckCircle className="w-3 h-3 mr-2 text-green-500" /> Sequence detection
+                  </div>
+                  <div className="flex items-center text-muted-foreground">
+                    <CheckCircle className="w-3 h-3 mr-2 text-green-500" /> Repeated endings
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="lg:col-span-2 space-y-4">
+          <h3 className="text-lg font-medium font-mono text-muted-foreground mb-4 border-b border-border/50 pb-2">
+            GENERATED CANDIDATES [CONFIDENCE RANKED]
+          </h3>
+          
+          <div className="space-y-3">
+            {mockGeneratedPicks.map((pick, i) => (
+              <div key={i} className={`p-4 rounded-lg border ${i === 0 ? 'bg-primary/5 border-primary/30' : 'bg-card border-border/50'} relative overflow-hidden group hover:border-primary/50 transition-colors`}>
+                
+                {i === 0 && <div className="absolute top-0 right-0 w-16 h-16 bg-primary/10 rounded-bl-full -mr-8 -mt-8 pointer-events-none"></div>}
+                
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div className="flex items-center space-x-4">
+                    <div className={`w-8 text-center font-mono font-bold text-lg ${i === 0 ? 'text-primary' : 'text-muted-foreground'}`}>
+                      #{pick.rank}
+                    </div>
+                    
+                    <div className="flex space-x-2">
+                      {pick.numbers.map((n, idx) => (
+                        <div key={idx} className="w-9 h-9 rounded bg-secondary flex items-center justify-center font-mono text-sm border border-border/80 shadow-sm">
+                          {n.toString().padStart(2, '0')}
+                        </div>
+                      ))}
+                      <div className="w-9 h-9 rounded bg-primary/20 text-primary border border-primary/30 flex items-center justify-center font-mono text-sm font-bold shadow-sm ml-2 relative">
+                        <Zap className="w-3 h-3 absolute -top-1 -right-1 text-yellow-500" />
+                        {pick.powerball.toString().padStart(2, '0')}
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center space-x-3 ml-12 md:ml-0 font-mono text-xs">
+                    <div className="flex flex-col items-end">
+                      <span className="text-muted-foreground">Draw-Fit</span>
+                      <span className="text-primary">{pick.drawFit}</span>
+                    </div>
+                    <div className="w-px h-8 bg-border"></div>
+                    <div className="flex flex-col items-end">
+                      <span className="text-muted-foreground">Anti-Pop</span>
+                      <span className="text-yellow-500">{pick.antiPop}</span>
+                    </div>
+                    <div className="w-px h-8 bg-border"></div>
+                    <div className="flex flex-col items-end">
+                      <span className="text-muted-foreground font-bold">SCORE</span>
+                      <span className={`font-bold ${i === 0 ? 'text-primary text-base' : ''}`}>{pick.finalScore.toFixed(1)}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
