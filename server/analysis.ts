@@ -45,6 +45,21 @@ const STRATEGY_TO_MODE: Record<string, GeneratorMode> = {
   "Random": "random_baseline",
 };
 
+const MODE_TO_LABEL: Record<GeneratorMode, string> = {
+  "balanced": "Balanced",
+  "anti_popular": "Low Split-Risk",
+  "anti_popular_only": "Anti-Popular Only",
+  "pattern_only": "Experimental Pattern",
+  "random_baseline": "Random Baseline",
+  "most_drawn_all_time": "Most Drawn (All-Time)",
+  "most_drawn_last_50": "Most Drawn (Last 50)",
+  "most_drawn_last_100": "Most Drawn (Last 100)",
+  "most_drawn_last_20": "Most Drawn (Last 20)",
+  "least_drawn_last_50": "Least Drawn (Last 50)",
+  "structure_matched_random": "Structure-Matched Random",
+  "diversity_optimized": "Diversity Optimized",
+};
+
 export function getGeneratorRecommendation(): GeneratorRecommendation {
   if (!latestBenchmarkResult || latestBenchmarkResult.stabilityByStrategy.length === 0) {
     return {
@@ -83,12 +98,13 @@ export function getGeneratorRecommendation(): GeneratorRecommendation {
   if (possibleEdge.length > 0) {
     const top = possibleEdge.sort((a, b) => b.avgDelta - a.avgDelta)[0];
     const mode = STRATEGY_TO_MODE[top.strategy] || "balanced";
+    const modeLabel = MODE_TO_LABEL[mode] || "Balanced";
     const isMostDrawn = top.strategy.startsWith("Most Drawn");
     return {
       recommendedMode: mode,
-      recommendedStrategy: top.strategy,
+      recommendedStrategy: modeLabel,
       confidence: possibleEdge.length >= 2 ? "high" : "medium",
-      reasonSummary: `"${top.strategy}" consistently outperformed random across ${top.windowsBeating} of ${top.windowsTested} test windows (avg delta +${top.avgDelta}). ${isMostDrawn ? "Using this frequency benchmark directly." : "Using balanced mode to blend this signal with anti-popularity protection."}`,
+      reasonSummary: `"${top.strategy}" consistently outperformed random across ${top.windowsBeating} of ${top.windowsTested} test windows (avg delta +${top.avgDelta}). ${isMostDrawn ? "Using this frequency benchmark directly." : `Using ${modeLabel} mode to blend this signal with anti-popularity protection.`}`,
       evidence,
       strategyBadges: badges,
       hasBenchmark: true,
@@ -97,11 +113,13 @@ export function getGeneratorRecommendation(): GeneratorRecommendation {
 
   if (weakEdge.length > 0) {
     const top = weakEdge.sort((a, b) => b.avgDelta - a.avgDelta)[0];
+    const mode = STRATEGY_TO_MODE[top.strategy] || "balanced";
+    const modeLabel = MODE_TO_LABEL[mode] || "Balanced";
     return {
-      recommendedMode: "balanced",
-      recommendedStrategy: top.strategy,
+      recommendedMode: mode,
+      recommendedStrategy: modeLabel,
       confidence: "low",
-      reasonSummary: `"${top.strategy}" showed a small advantage in ${top.windowsBeating} of ${top.windowsTested} windows (avg delta +${top.avgDelta}), but it's not stable across all windows. Using balanced mode to mix this weak signal with anti-popularity scoring. Monitor over future benchmarks.`,
+      reasonSummary: `"${top.strategy}" showed a small advantage in ${top.windowsBeating} of ${top.windowsTested} windows (avg delta +${top.avgDelta}), but it's not stable across all windows. Using ${modeLabel} mode to mix this weak signal with anti-popularity scoring. Monitor over future benchmarks.`,
       evidence,
       strategyBadges: badges,
       hasBenchmark: true,
