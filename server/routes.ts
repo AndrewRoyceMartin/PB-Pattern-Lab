@@ -82,6 +82,15 @@ export async function registerRoutes(
     }
   });
 
+  app.delete("/api/draws", async (_req, res) => {
+    try {
+      await storage.clearDraws();
+      res.json({ ok: true, meta: { drawsUsed: 0, modernFormatOnly: true, generatedAt: new Date().toISOString() }, data: { message: "All draw data cleared." } });
+    } catch (error: any) {
+      res.status(500).json({ ok: false, message: error.message });
+    }
+  });
+
   app.get("/api/draws", async (_req, res) => {
     try {
       const draws = await storage.getModernDraws();

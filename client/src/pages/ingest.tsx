@@ -1,9 +1,9 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { UploadCloud, FileType, CheckCircle, Clock, Loader2 } from "lucide-react";
+import { UploadCloud, FileType, CheckCircle, Clock, Loader2, Trash2 } from "lucide-react";
 import { useRef, useState } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { uploadCSV } from "@/lib/api";
+import { uploadCSV, resetData } from "@/lib/api";
 import { fetchApi } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
 
@@ -11,9 +11,11 @@ export default function Ingest() {
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
   const [uploadResult, setUploadResult] = useState<any>(null);
 
-  const { data: stats } = useQuery({ queryKey: ["/api/stats"], queryFn: () => fetchApi("/api/stats") });
+  const { data: stats, refetch: refetchStats } = useQuery({ queryKey: ["/api/stats"], queryFn: () => fetchApi("/api/stats") });
   const hasData = stats?.totalDraws > 0;
 
   const handleFile = async (file: File) => {
@@ -39,6 +41,25 @@ export default function Ingest() {
     e.preventDefault();
     const file = e.dataTransfer.files[0];
     if (file) await handleFile(file);
+  };
+
+  const handleReset = async () => {
+    if (!confirmReset) {
+      setConfirmReset(true);
+      return;
+    }
+    setIsResetting(true);
+    try {
+      await resetData();
+      setUploadResult(null);
+      setConfirmReset(false);
+      await refetchStats();
+      toast({ title: "Data cleared", description: "All draw data has been removed. Ready for a new upload." });
+    } catch (error: any) {
+      toast({ title: "Reset failed", description: error.message, variant: "destructive" });
+    } finally {
+      setIsResetting(false);
+    }
   };
 
   const pipelineOk = hasData || !!uploadResult;
@@ -107,6 +128,29 @@ export default function Ingest() {
               <span className="text-xs text-muted-foreground uppercase tracking-wider">Last Draw Date</span>
               <div className={`text-xl font-mono ${hasData ? "" : "text-muted-foreground"}`} data-testid="text-latest-date">{stats?.latestDate ?? "N/A"}</div>
             </div>
+            {hasData && (
+              <div className="pt-4 border-t border-border">
+                {confirmReset ? (
+                  <div className="space-y-2">
+                    <p className="text-sm text-destructive font-medium">This will delete all draw data. Are you sure?</p>
+                    <div className="flex gap-2">
+                      <Button variant="destructive" size="sm" onClick={handleReset} disabled={isResetting} data-testid="button-confirm-reset">
+                        {isResetting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Trash2 className="w-4 h-4 mr-2" />}
+                        {isResetting ? "Clearing..." : "Yes, clear all data"}
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => setConfirmReset(false)} disabled={isResetting} data-testid="button-cancel-reset">
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <Button variant="outline" size="sm" className="text-destructive border-destructive/30 hover:bg-destructive/10" onClick={handleReset} data-testid="button-reset-data">
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    Reset Data
+                  </Button>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
