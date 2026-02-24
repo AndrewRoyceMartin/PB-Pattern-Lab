@@ -9,6 +9,10 @@ import {
   type RollingWindow,
   type GeneratedPick,
   type AntiPopularityBreakdown,
+  type BenchmarkSummary,
+  type BenchmarkStrategyWindow,
+  type BenchmarkStrategyStability,
+  type StabilityClass,
 } from "@shared/schema";
 
 // ═══════════════════════════════════════════
@@ -365,6 +369,173 @@ export function runWalkForwardValidation(draws: Draw[]): ValidationSummary {
       modernFormatOnly: true,
       compositeVsRandomDelta: Number(delta.toFixed(2)),
     },
+  };
+}
+
+// ═══════════════════════════════════════════
+// Engine B2: Multi-Window Benchmark Validation
+// ═══════════════════════════════════════════
+
+type StrategyFn = (trainDraws: Draw[]) => { picks: number[]; pb: number };
+
+function getStrategyRegistry(): { name: string; fn: StrategyFn }[] {
+  return [
+    {
+      name: "Random",
+      fn: () => ({ picks: generateRandomCard(), pb: Math.floor(Math.random() * 20) + 1 }),
+    },
+    {
+      name: "Frequency Only",
+      fn: (train) => {
+        const freqs = computeNumberFrequencies(train);
+        const sorted = [...freqs].sort((a, b) => b.totalFreq - a.totalFreq);
+        return { picks: sorted.slice(0, 7).map(f => f.number).sort((a, b) => a - b), pb: topPb(getPbFreqs(train)) };
+      },
+    },
+    {
+      name: "Recency Only",
+      fn: (train) => {
+        const freqs = computeNumberFrequencies(train);
+        const sorted = [...freqs].sort((a, b) => a.drawsSinceSeen - b.drawsSinceSeen);
+        return { picks: sorted.slice(0, 7).map(f => f.number).sort((a, b) => a - b), pb: train[0]?.powerball || 1 };
+      },
+    },
+    {
+      name: "Structure-Aware",
+      fn: (train) => ({ picks: generateStructureAwareCard(train), pb: Math.floor(Math.random() * 20) + 1 }),
+    },
+    {
+      name: "Composite",
+      fn: (train) => {
+        const freqs = computeNumberFrequencies(train);
+        const scored = freqs.map(f => ({
+          number: f.number,
+          score: f.last25Freq * 2 + f.last10Freq * 3 - f.drawsSinceSeen * 0.5 + f.rollingTrend * 2,
+        }));
+        const sorted = [...scored].sort((a, b) => b.score - a.score);
+        return { picks: sorted.slice(0, 7).map(f => f.number).sort((a, b) => a - b), pb: topPb(getPbFreqs(train.slice(0, 25))) };
+      },
+    },
+    {
+      name: "Most Drawn (All-Time)",
+      fn: (train) => buildMostDrawnPick(train, train.length),
+    },
+    {
+      name: "Most Drawn (Last 50)",
+      fn: (train) => buildMostDrawnPick(train, 50),
+    },
+    {
+      name: "Most Drawn (Last 100)",
+      fn: (train) => buildMostDrawnPick(train, 100),
+    },
+  ];
+}
+
+export function runBenchmarkValidation(draws: Draw[], windowSizes: number[] = [20, 40, 60, 100], minTrainDraws: number = 100): BenchmarkSummary {
+  const strategies = getStrategyRegistry();
+  const validWindows = windowSizes.filter(w => draws.length >= w + minTrainDraws);
+
+  if (validWindows.length === 0) {
+    return {
+      byWindowByStrategy: [],
+      stabilityByStrategy: [],
+      windowSizesTested: [],
+      totalDrawsAvailable: draws.length,
+      overallVerdict: `Insufficient data: ${draws.length} draws available, need at least ${Math.min(...windowSizes) + minTrainDraws} for the smallest window.`,
+    };
+  }
+
+  const allResults: BenchmarkStrategyWindow[] = [];
+
+  for (const windowSize of validWindows) {
+    const testDraws = draws.slice(0, windowSize);
+    const trainDraws = draws.slice(windowSize);
+
+    const windowResults: { strategy: string; avgMain: number; bestMain: number; pbHits: number }[] = [];
+
+    for (const strat of strategies) {
+      let totalMain = 0;
+      let bestMain = 0;
+      let pbHits = 0;
+
+      for (const testDraw of testDraws) {
+        const actual = testDraw.numbers as number[];
+        const actualPB = testDraw.powerball;
+        const { picks, pb } = strat.fn(trainDraws);
+        const mainMatches = picks.filter(n => actual.includes(n)).length;
+        totalMain += mainMatches;
+        bestMain = Math.max(bestMain, mainMatches);
+        if (pb === actualPB) pbHits++;
+      }
+
+      windowResults.push({
+        strategy: strat.name,
+        avgMain: totalMain / testDraws.length,
+        bestMain,
+        pbHits,
+      });
+    }
+
+    const randomResult = windowResults.find(r => r.strategy === "Random");
+    const randomAvg = randomResult?.avgMain ?? 0;
+
+    for (const r of windowResults) {
+      const delta = r.strategy === "Random" ? 0 : Number((r.avgMain - randomAvg).toFixed(3));
+      allResults.push({
+        strategy: r.strategy,
+        windowSize,
+        testDraws: windowSize,
+        trainDraws: trainDraws.length,
+        avgMainMatches: Number(r.avgMain.toFixed(2)),
+        bestMainMatches: r.bestMain,
+        powerballHitRate: Number(((r.pbHits / windowSize) * 100).toFixed(1)),
+        powerballHits: r.pbHits,
+        deltaVsRandom: Number(delta.toFixed(2)),
+        beatsRandom: r.strategy !== "Random" && delta > 0,
+      });
+    }
+  }
+
+  const strategyNames = [...new Set(allResults.map(r => r.strategy))].filter(s => s !== "Random");
+  const stabilityByStrategy: BenchmarkStrategyStability[] = strategyNames.map(name => {
+    const rows = allResults.filter(r => r.strategy === name);
+    const windowsTested = rows.length;
+    const windowsBeating = rows.filter(r => r.deltaVsRandom > 0.05).length;
+    const windowsLosing = rows.filter(r => r.deltaVsRandom < -0.05).length;
+    const avgDelta = Number((rows.reduce((sum, r) => sum + r.deltaVsRandom, 0) / windowsTested).toFixed(2));
+
+    let stabilityClass: StabilityClass;
+    if (windowsTested === 0) {
+      stabilityClass = "insufficient_data";
+    } else if (windowsBeating >= 3 && windowsLosing === 0) {
+      stabilityClass = "possible_edge";
+    } else if (windowsBeating >= 2) {
+      stabilityClass = "weak_edge";
+    } else if (windowsLosing > windowsBeating && avgDelta < -0.1) {
+      stabilityClass = "underperforming";
+    } else {
+      stabilityClass = "no_edge";
+    }
+
+    return { strategy: name, windowsTested, windowsBeating, windowsLosing, avgDelta, stabilityClass };
+  });
+
+  const edgeStrategies = stabilityByStrategy.filter(s => s.stabilityClass === "possible_edge" || s.stabilityClass === "weak_edge");
+  let overallVerdict: string;
+  if (edgeStrategies.length === 0) {
+    overallVerdict = `No strategy showed a consistent edge over random across ${validWindows.length} test windows (${validWindows.join(", ")} draws). This is expected — lottery draws are designed to be random. The anti-popularity engine remains your most practical advantage for reducing split-risk.`;
+  } else {
+    const names = edgeStrategies.map(s => s.strategy).join(", ");
+    const classes = edgeStrategies.map(s => `${s.strategy}: ${s.stabilityClass.replace(/_/g, " ")}`).join("; ");
+    overallVerdict = `Potential signals detected: ${names}. Classification: ${classes}. These results should be monitored over time — a single benchmark run can overfit to historical patterns.`;
+  }
+
+  return {
+    byWindowByStrategy: allResults,
+    stabilityByStrategy,
+    windowSizesTested: validWindows,
+    totalDrawsAvailable: draws.length,
+    overallVerdict,
   };
 }
 

@@ -1,0 +1,398 @@
+Perfect. This is the best next step.
+
+You now want a proper benchmark harness that tests all predictors under the same rules and tells you, clearly:
+
+which ones beat random (if any),
+
+in which windows,
+
+and whether the result is stable or just luck.
+
+What to add next (validation upgrade)
+Goal
+
+Build a multi-window walk-forward validation suite across all strategies/predictors.
+
+Strategies to include (minimum)
+
+random
+
+most_drawn_all_time
+
+most_drawn_last_50
+
+most_drawn_last_100
+
+recency_weighted (if implemented)
+
+composite (pattern-based)
+
+any experimental strategies you currently have
+
+What “better validation” means
+1) Test multiple windows, not one
+
+Run walk-forward backtests for:
+
+20 draws
+
+40 draws
+
+60 draws
+
+100 draws (if enough data)
+
+This stops one lucky window from misleading you.
+
+2) Compare against random every time
+
+For each strategy and window, compute:
+
+Delta vs Random for:
+
+mean best main matches
+
+mean best total score
+
+Powerball hit rate
+
+avg matches across top 10 cards
+
+This gives you a clean benchmark.
+
+3) Add stability scoring
+
+A strategy is only interesting if it is consistent.
+
+Example stability rules
+
+Stable positive: beats random in 3+ windows
+
+Weak/unstable: beats random in only 1 window
+
+No edge: mostly equal to or below random
+
+Underperforming: below random in most windows
+
+4) Add significance checks (later optional, but recommended)
+
+Once multi-window is running, add:
+
+Permutation test (strategy score vs shuffled outcomes)
+
+Monte Carlo benchmark (real results vs simulated fair histories)
+
+This tells you if observed lift is beyond chance.
+
+Replit Instructions — Add Multi-Window Validation Across All Predictors
+Step 1 — Create a validation benchmark runner on the server
+File to edit
+
+server/analysis.ts (or split into server/validation.ts if cleaner)
+
+Add function
+
+Create a new function like:
+
+runBenchmarkValidation(draws, config)
+
+It should:
+
+Loop through window sizes [20, 40, 60, 100] (as available)
+
+For each window, run walk-forward validation across all strategies
+
+Return a structured summary + per-draw details (optional)
+
+Output shape (recommended)
+
+Return:
+
+byWindowByStrategy summary table
+
+deltasVsRandom
+
+stabilitySummary
+
+overallVerdicts
+
+Step 2 — Standardise a strategy interface (important)
+
+If not already done, make all strategies conform to the same contract.
+
+Strategy contract (concept)
+
+Each strategy should accept:
+
+trainDraws
+
+generator config (top_n_games, pool sizes, etc.)
+
+And return:
+
+generated top 10 cards
+
+optional diagnostics (diversity, top PB, etc.)
+
+This lets validation test every strategy identically.
+
+Step 3 — Reuse the same scoring for every strategy
+
+Do not let each strategy use different scoring rules in backtest.
+
+Use one scoring function for all:
+
+main_matches
+
+powerball_match
+
+total_match_score
+
+That keeps comparison fair.
+
+Step 4 — Add multi-window loop to validation runner
+Window sizes to test
+
+Use:
+
+20
+
+40
+
+60
+
+100
+
+Only run a window if:
+
+enough modern-format draws exist
+
+minimum training threshold is satisfied
+
+Suggested defaults
+
+minTrainDraws = 100
+
+topNGames = 10
+
+Step 5 — Add delta-vs-random calculations
+
+For each window:
+
+find random summary row
+
+compute strategy deltas against random for key metrics
+
+Add fields like
+
+delta_best_main_matches_vs_random
+
+delta_best_total_score_vs_random
+
+delta_pb_hit_rate_vs_random
+
+This is the most important comparison output.
+
+Step 6 — Add stability classification
+
+After all windows finish, aggregate per strategy.
+
+Classification logic (simple and effective)
+
+For each strategy:
+
+count windows where delta_best_total_score_vs_random > +0.05
+
+count windows where delta_best_total_score_vs_random < -0.05
+
+Then classify:
+
+possible_edge = positive in >= 3 windows and never strongly negative
+
+weak_edge = positive in 2 windows
+
+no_edge = mixed / near zero
+
+underperforming = negative in most windows
+
+Use this as a top-line verdict.
+
+Step 7 — Add diagnostics across all predictors
+
+This helps explain “why no edge.”
+
+For each strategy/window, store:
+
+unique_main_combos_generated (avg)
+
+unique_powerballs_generated (avg)
+
+top-card overlap vs random (optional)
+
+top-card overlap vs other strategies (optional later)
+
+This reveals narrow generators (common issue with “Most Drawn”).
+
+Step 8 — Expose a new API endpoint (or extend validation endpoint)
+Option A (preferred)
+
+Add:
+
+POST /api/validation/benchmark
+
+Request body:
+
+window sizes
+
+selected strategies
+
+generator config
+
+min training draws
+
+Response:
+
+summaries
+
+deltas
+
+stability verdicts
+
+optional detail rows
+
+Option B
+
+Extend existing validation endpoint to support a benchmarkMode: true flag.
+
+Step 9 — Build a “Benchmark Validation” page/table in the client
+File to edit
+
+client/src/pages/validation.tsx
+
+Add sections
+A) Benchmark Controls
+
+window sizes (checkboxes or default set)
+
+strategy selection (multi-select)
+
+min training draws
+
+top N games
+
+pool sizes (advanced)
+
+B) Results Table (by window × strategy)
+
+Columns:
+
+Window
+
+Strategy
+
+Test draws
+
+Mean best main matches
+
+Mean best total score
+
+PB hit rate
+
+Delta vs Random (best total)
+
+Delta vs Random (main matches)
+
+Verdict
+
+C) Strategy Stability Summary
+
+One row per strategy:
+
+windows tested
+
+windows beating random
+
+windows losing to random
+
+avg delta vs random
+
+stability class
+
+D) Plain-English Summary
+
+Examples:
+
+“Most Drawn (Last 50) outperformed random in 1/4 windows only (weak/unstable).”
+
+“Composite strategy did not beat random across any tested windows (no edge).”
+
+Step 10 — Add a CSV export (highly recommended)
+
+Export benchmark results to CSV for review/comparison over time.
+
+This helps a lot when you start trying tweaks.
+
+Replit “Plan Work” tasks (copy/paste)
+Task 1 — Build multi-window benchmark validation runner
+
+Add server-side function to run walk-forward validation across window sizes 20/40/60/100
+
+Run all selected strategies under same scoring rules
+
+Return summary by window and strategy
+
+Task 2 — Add delta-vs-random and stability classification
+
+Compute metric deltas against random baseline for each window
+
+Aggregate across windows to classify each strategy (possible_edge / weak_edge / no_edge / underperforming)
+
+Task 3 — Add validation diagnostics across predictors
+
+Track generator diversity metrics (unique main combos, unique powerballs)
+
+Add optional overlap diagnostics for top-ranked cards
+
+Task 4 — Add benchmark validation API endpoint
+
+Create or extend validation endpoint to support multi-window benchmark requests
+
+Standardize response shape for frontend tables and summaries
+
+Task 5 — Add Benchmark Validation UI page section
+
+Add controls for strategy selection and window sizes
+
+Display by-window strategy results, delta-vs-random columns, and stability summary
+
+Add plain-English verdict summary
+
+Task 6 — Add CSV export and update replit.md
+
+Export benchmark summary/detail tables
+
+Document benchmark methodology and interpretation in replit.md
+
+Recommended benchmark settings (use first)
+
+Start with this exact setup:
+
+Strategies: random + all Most Drawn + composite + recency
+
+Windows: 20, 40, 60
+
+Min training draws: 100
+
+Top games per draw: 10
+
+PB candidates: 5 (to avoid zero-diversity PB issue)
+
+Combo pool main: 14–16
+
+Then review:
+
+deltas vs random
+
+stability
+
+diversity

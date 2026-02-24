@@ -46,6 +46,19 @@ export async function generatePicks(mode: GeneratorMode, drawFitWeight: number, 
   return json.data;
 }
 
+export async function runBenchmark(windowSizes: number[] = [20, 40, 60, 100], minTrainDraws: number = 100) {
+  const res = await fetch("/api/validation/benchmark", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ windowSizes, minTrainDraws }),
+  });
+  const json = await res.json();
+  if (!res.ok || !json.ok) {
+    throw new Error(json.message || "Benchmark failed");
+  }
+  return json.data;
+}
+
 async function fetchApi(url: string) {
   const res = await fetch(url);
   const json = await res.json();

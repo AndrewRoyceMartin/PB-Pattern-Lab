@@ -8,6 +8,7 @@ import {
   computePatternFeatures,
   runRandomnessAudit,
   runWalkForwardValidation,
+  runBenchmarkValidation,
   generateRankedPicks,
   generateMostDrawnCards,
 } from "./analysis";
@@ -150,6 +151,20 @@ export async function registerRoutes(
     try {
       const draws = await storage.getModernDraws();
       const results = runWalkForwardValidation(draws);
+      res.json(apiResponse(draws, results));
+    } catch (error: any) {
+      res.status(500).json({ ok: false, message: error.message });
+    }
+  });
+
+  app.post("/api/validation/benchmark", async (req, res) => {
+    try {
+      const { windowSizes = [20, 40, 60, 100], minTrainDraws = 100 } = req.body || {};
+      const draws = await storage.getModernDraws();
+      if (draws.length < 50) {
+        return res.status(400).json({ ok: false, message: `Only ${draws.length} modern draws available. Need at least 120 (min window + min training) for benchmark.` });
+      }
+      const results = runBenchmarkValidation(draws, windowSizes, minTrainDraws);
       res.json(apiResponse(draws, results));
     } catch (error: any) {
       res.status(500).json({ ok: false, message: error.message });

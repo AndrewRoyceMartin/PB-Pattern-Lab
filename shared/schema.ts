@@ -92,6 +92,38 @@ export interface ValidationSummary {
   };
 }
 
+export type StabilityClass = "possible_edge" | "weak_edge" | "no_edge" | "underperforming" | "insufficient_data";
+
+export interface BenchmarkStrategyWindow {
+  strategy: string;
+  windowSize: number;
+  testDraws: number;
+  trainDraws: number;
+  avgMainMatches: number;
+  bestMainMatches: number;
+  powerballHitRate: number;
+  powerballHits: number;
+  deltaVsRandom: number;
+  beatsRandom: boolean;
+}
+
+export interface BenchmarkStrategyStability {
+  strategy: string;
+  windowsTested: number;
+  windowsBeating: number;
+  windowsLosing: number;
+  avgDelta: number;
+  stabilityClass: StabilityClass;
+}
+
+export interface BenchmarkSummary {
+  byWindowByStrategy: BenchmarkStrategyWindow[];
+  stabilityByStrategy: BenchmarkStrategyStability[];
+  windowSizesTested: number[];
+  totalDrawsAvailable: number;
+  overallVerdict: string;
+}
+
 export type GeneratorMode = "balanced" | "anti_popular" | "pattern_only" | "random_baseline" | "most_drawn_all_time" | "most_drawn_last_50" | "most_drawn_last_100";
 
 export interface GeneratorConfig {

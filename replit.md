@@ -19,6 +19,13 @@ The app follows a monorepo structure with three main directories:
   - Added `/api/analysis/audit` endpoint
   - Generator supports 7 modes: balanced, anti_popular, pattern_only, random_baseline, most_drawn_all_time, most_drawn_last_50, most_drawn_last_100
   - Rebuilt all 5 frontend pages with improved UX
+- **2026-02-24**: Added multi-window benchmark validation engine:
+  - New `POST /api/validation/benchmark` endpoint with configurable window sizes and min training draws
+  - Tests all 8 strategies across multiple windows (20/40/60/100 draws) under identical scoring rules
+  - Stability classification per strategy: possible_edge, weak_edge, no_edge, underperforming
+  - Overall verdict with plain-English summary
+  - Validation page rebuilt with: single-window table, benchmark runner with window selection, stability summary, full Window x Strategy results, CSV export
+  - New shared types: BenchmarkSummary, BenchmarkStrategyWindow, BenchmarkStrategyStability, StabilityClass
 - **2026-02-24**: Added Most Drawn frequency benchmark strategies:
   - 3 new strategies (All-Time, Last 50, Last 100) in walk-forward validation
   - Validation table shows "beats random" flag and delta per strategy
@@ -62,6 +69,7 @@ Preferred communication style: Simple, everyday language.
 - **Analysis Engine** (`server/analysis.ts`): Three engines:
   - Engine A (Pattern Discovery): frequency, structure, carryover, rolling drift
   - Engine B (Validation): walk-forward backtest with 8 strategies (Random, Frequency, Recency, Structure-Aware, Composite, Most Drawn All-Time, Most Drawn Last 50, Most Drawn Last 100), rolling windows, verdict classification (no_edge/weak_edge/possible_edge/insufficient_data), "beats random" flag per strategy
+  - Engine B2 (Multi-Window Benchmark): tests all strategies across configurable window sizes (20/40/60/100 draws), computes per-window deltas vs random, aggregates into stability classification (possible_edge/weak_edge/no_edge/underperforming), CSV export
   - Engine C (Generator): ranked picks with draw-fit scoring, anti-popularity penalties (birthday, sequence, endings, aesthetic, low PB), 7 generation modes including 3 Most Drawn frequency benchmarks
 - **Dev Server**: Vite middleware is integrated into Express for HMR during development
 - **Production Build**: Vite builds the client; esbuild bundles the server into `dist/index.cjs`
