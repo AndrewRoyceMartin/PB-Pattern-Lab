@@ -1,0 +1,450 @@
+This phase should focus on hardening correctness + improving research quality rather than just adding more strategies.
+
+Next Phase Goal
+Objective
+
+Make the app more trustworthy, reproducible, and extensible by improving:
+
+Data ingestion robustness
+
+Benchmark correctness
+
+Significance testing quality
+
+Persistence / reproducibility
+
+Code structure for faster future strategy work
+
+Phase Name
+Phase: Validation Hardening + Research Infrastructure
+Replit Plan Work — Next Phase (copy/paste)
+Task 1 — Replace fragile CSV parsing with a robust parser
+Scope
+
+Refactor upload/import parsing to use a proper CSV parser library instead of manual split(",").
+
+Why
+
+Manual splitting is fragile and can break on quoted fields, embedded commas, and format variations.
+
+Implementation
+
+Add a CSV parser package (e.g. csv-parse or papaparse)
+
+Parse rows safely first
+
+Keep your existing flexible column/header mapping logic after parsing
+
+Preserve current import behavior for supported Powerball CSV layouts
+
+Acceptance criteria
+
+Existing CSV files still import correctly
+
+Quoted fields and whitespace variations no longer break parsing
+
+Import errors provide clear row-level messages where possible
+
+Upload route code becomes simpler/safer
+
+Task 2 — Fix benchmark averaging to use evaluated draw counts (rolling mode correctness)
+Scope
+
+Correct benchmark summary metrics so rolling walk-forward averages divide by the number of evaluated draws, not total test draws when some are skipped due to min training thresholds.
+
+Why
+
+Current averages can be understated if early draws are skipped in rolling mode.
+
+Implementation
+
+Track evaluatedDraws per strategy/window
+
+Track skippedDraws per strategy/window (optional but useful)
+
+Use evaluatedDraws as denominator for all averages and hit rates
+
+Surface this metadata in benchmark tables
+
+Acceptance criteria
+
+Rolling benchmark summaries report correct averages
+
+UI/API clearly show evaluated vs skipped draws
+
+“Beats random” and deltas use corrected denominators
+
+Fixed holdout mode remains unchanged
+
+Task 3 — Improve permutation test methodology (v2)
+Scope
+
+Upgrade permutation testing to use a stronger null model and unbiased shuffling.
+
+Why
+
+The current v1 approach is useful but can be improved for statistical credibility.
+
+Implementation
+
+Replace sort(() => rng - 0.5) shuffling with Fisher–Yates
+
+Permute outcomes across timestamps / draw order labels (or equivalent null-preserving scheme), not only within-draw order
+
+Support selecting:
+
+metric (best_total_score_delta, best_main_matches_delta, etc.)
+
+scope (single_window, all_windows)
+
+Clearly label method in response metadata
+
+Acceptance criteria
+
+Permutation results are reproducible with seed
+
+API returns method metadata (shuffle type, scope, runs)
+
+UI labels remain caveated (“supporting evidence only”)
+
+No significant performance regression at default run counts
+
+Task 4 — Persist benchmark runs and recommendation inputs in the database
+Scope
+
+Store benchmark results/configs so recommendations survive restarts and can be audited.
+
+Why
+
+In-memory latest benchmark state is fragile and disappears on restart/redeploy.
+
+Implementation
+
+Add a benchmark_runs table (JSON payload is fine for v1)
+
+Store:
+
+benchmark id
+
+timestamp
+
+config (mode, windows, minTrainDraws, seed, randomBaselineRuns)
+
+summary results
+
+optional detailed results JSON
+
+status/success flag
+
+Update recommendation engine to read latest successful benchmark from DB
+
+Add stale-benchmark warning logic (e.g. older than X days)
+
+Acceptance criteria
+
+Recommendation still works after server restart
+
+Benchmark history is queryable (at least latest + list endpoint optional)
+
+Generator recommendation panel references persisted benchmark metadata
+
+Missing benchmark state handled gracefully
+
+Task 5 — Refactor routes.ts into route modules
+Scope
+
+Split the large route registration file into focused modules.
+
+Why
+
+Current route file is becoming hard to maintain as features expand (analysis, generator, formula lab, upload, validation).
+
+Suggested module split
+
+server/routes/upload.ts
+
+server/routes/analysis.ts
+
+server/routes/validation.ts
+
+server/routes/generator.ts
+
+server/routes/formulaLab.ts
+
+Implementation
+
+Keep registerRoutes() as the top-level orchestration point
+
+Move handlers into modules with shared helper imports
+
+Preserve endpoint paths and response shapes
+
+Acceptance criteria
+
+All existing endpoints still work
+
+No route path regressions
+
+Route modules are smaller and easier to navigate
+
+Build passes without circular import issues
+
+Task 6 — Replace generator mode if/else chain with a handler registry map
+Scope
+
+Refactor generator strategy dispatch to use a typed handler map.
+
+Why
+
+The generator mode branching logic is getting long and harder to extend/test.
+
+Implementation
+
+Create a generatorHandlers registry:
+
+key = generator mode enum
+
+value = function handler
+
+Support portfolio mode and future modes through same interface
+
+Standardize handler return shape (cards + diagnostics + metadata)
+
+Acceptance criteria
+
+Existing generator modes behave the same
+
+Adding a new mode only requires registering one handler
+
+Generator route code becomes shorter/clearer
+
+Type safety is preserved across all modes
+
+Task 7 — Add Zod request validation for benchmark, generator, and Formula Lab endpoints
+Scope
+
+Validate incoming API request bodies before processing.
+
+Why
+
+Prevents malformed payloads from causing subtle logic bugs, especially with advanced settings.
+
+Endpoints to cover first
+
+POST /api/validation/benchmark
+
+POST /api/generate
+
+POST /api/formula-lab/optimize
+
+(optional) POST /api/formula-lab/replay
+
+Implementation
+
+Define request schemas in shared/server validation files
+
+Apply safe parsing in route handlers
+
+Return structured error messages with invalid fields
+
+Acceptance criteria
+
+Invalid payloads return clear 4xx responses
+
+Valid payloads continue to work unchanged
+
+Frontend errors are understandable (not stack traces)
+
+Defaults/caps are still applied consistently
+
+Task 8 — Add benchmark metadata and reproducibility panel in the Validation UI
+Scope
+
+Expose benchmark configuration and reproducibility metadata in the UI.
+
+Why
+
+Users need to know how a benchmark was run to trust or compare results.
+
+Show in UI
+
+benchmark mode (fixed holdout / rolling walk-forward)
+
+windows tested
+
+min train draws
+
+seed
+
+random baseline runs
+
+permutation runs/method (if enabled)
+
+generated timestamp
+
+data scope (modern-only / date range)
+
+Acceptance criteria
+
+Validation page shows benchmark metadata clearly
+
+CSV exports (if available) include metadata
+
+Users can tell when two benchmark runs are comparable
+
+Task 9 — Add benchmark history viewer (lightweight v1)
+Scope
+
+Let users inspect recent benchmark runs and re-apply one to the recommendation context.
+
+Why
+
+This helps compare changes over time and supports reproducible experimentation.
+
+Features (v1)
+
+list latest N benchmark runs
+
+show timestamp + key config + top verdict summary
+
+“Use for Recommendation” (optional) or auto-use latest successful
+
+“View Details” to inspect summary
+
+Acceptance criteria
+
+Users can see at least recent benchmark summaries
+
+Recommendation panel references a known benchmark run id/timestamp
+
+No heavy UI needed (simple table/list is enough)
+
+Task 10 — Update replit.md and add methodology caveats for the new phase
+Scope
+
+Document the new hardened methodology and infrastructure.
+
+Add sections
+
+robust CSV import parsing
+
+rolling benchmark denominator fix (evaluatedDraws)
+
+permutation v2 method
+
+benchmark persistence + recommendation sourcing
+
+reproducibility metadata (seed, random runs, mode)
+
+API request validation behavior
+
+Acceptance criteria
+
+replit.md matches actual implementation
+
+Methodology notes are caveated and precise
+
+No stale descriptions of in-memory-only benchmark recommendation remain
+
+Suggested Implementation Order (fastest value, least risk)
+Phase A — Correctness first
+
+Task 2 (evaluated draw denominator fix)
+
+Task 3 (permutation v2)
+
+Task 7 (request validation)
+
+Phase B — Reliability and persistence
+
+Task 4 (persist benchmark runs)
+
+Task 8 (benchmark metadata in UI)
+
+Task 9 (benchmark history viewer)
+
+Phase C — Refactor for future strategy growth
+
+Task 5 (route module split)
+
+Task 6 (generator handler registry)
+
+Phase D — Input robustness + docs
+
+Task 1 (robust CSV parser)
+
+Task 10 (replit.md updates)
+
+Optional Strategy Research Add-ons for This Phase (if time permits)
+Add-on A — Bayesian-smoothed PB-only strategy diagnostics
+
+Separate PB model diagnostics from main number model in validation summary.
+
+Add-on B — Regime segmented benchmark report
+
+Show “recent vs older modern era” strategy performance side-by-side.
+
+Add-on C — Confidence calibration v1
+
+Base generator confidence labels on:
+
+rolling benchmark stability
+
+random ensemble band position
+
+permutation percentile
+
+Acceptance Test Checklist (end of phase)
+Correctness
+
+ Rolling benchmark averages use evaluated draw counts
+
+ Skipped draws (if any) are visible in results
+
+ Permutation test uses unbiased shuffle and reports method metadata
+
+Reproducibility
+
+ Benchmarks persist to DB and survive restart
+
+ Recommendation engine uses persisted benchmark
+
+ Validation UI displays seed / random runs / mode
+
+API robustness
+
+ Invalid benchmark/generator/formula requests return clear validation errors
+
+ Existing valid workflows still function
+
+Maintainability
+
+ Routes split into modules without breaking endpoints
+
+ Generator dispatch uses handler registry map
+
+ Adding a new generator mode is simpler than before
+
+Import reliability
+
+ CSV parsing handles quoted fields / spacing safely
+
+ Existing Powerball CSV format still imports correctly
+
+Documentation
+
+ replit.md reflects methodology and persistence changes accurately
+
+Why this is the right next phase
+
+You’ve already added a lot of good strategy and validation capability. The highest leverage move now is to make the system:
+
+more correct
+
+more reproducible
+
+more explainable
+
+easier to extend
+
+That will make every future strategy experiment much more reliable.

@@ -1,4 +1,4 @@
-import { type Draw, type InsertDraw, draws } from "@shared/schema";
+import { type Draw, type InsertDraw, draws, type BenchmarkRun, type InsertBenchmarkRun, benchmarkRuns, type BenchmarkSummary, type BenchmarkRunConfig } from "@shared/schema";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { eq, desc, sql } from "drizzle-orm";
 import pg from "pg";
@@ -12,6 +12,10 @@ export interface IStorage {
   getModernDraws(): Promise<Draw[]>;
   getDrawCount(): Promise<number>;
   clearDraws(): Promise<void>;
+  saveBenchmarkRun(config: BenchmarkRunConfig, summary: BenchmarkSummary): Promise<BenchmarkRun>;
+  getLatestBenchmarkRun(): Promise<BenchmarkRun | null>;
+  listBenchmarkRuns(limit?: number): Promise<BenchmarkRun[]>;
+  getBenchmarkRunById(id: number): Promise<BenchmarkRun | null>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -36,6 +40,36 @@ export class DatabaseStorage implements IStorage {
 
   async clearDraws(): Promise<void> {
     await db.delete(draws);
+  }
+
+  async saveBenchmarkRun(config: BenchmarkRunConfig, summary: BenchmarkSummary): Promise<BenchmarkRun> {
+    const [run] = await db.insert(benchmarkRuns).values({
+      config: config as any,
+      summary: summary as any,
+      status: "success",
+    }).returning();
+    return run;
+  }
+
+  async getLatestBenchmarkRun(): Promise<BenchmarkRun | null> {
+    const rows = await db.select().from(benchmarkRuns)
+      .where(eq(benchmarkRuns.status, "success"))
+      .orderBy(desc(benchmarkRuns.createdAt))
+      .limit(1);
+    return rows[0] ?? null;
+  }
+
+  async listBenchmarkRuns(limit: number = 10): Promise<BenchmarkRun[]> {
+    return db.select().from(benchmarkRuns)
+      .orderBy(desc(benchmarkRuns.createdAt))
+      .limit(limit);
+  }
+
+  async getBenchmarkRunById(id: number): Promise<BenchmarkRun | null> {
+    const rows = await db.select().from(benchmarkRuns)
+      .where(eq(benchmarkRuns.id, id))
+      .limit(1);
+    return rows[0] ?? null;
   }
 }
 

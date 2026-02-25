@@ -30,6 +30,15 @@ export function storeBenchmarkResult(result: BenchmarkSummary): void {
   latestBenchmarkTime = new Date().toISOString();
 }
 
+export function loadBenchmarkFromDb(summary: BenchmarkSummary, createdAt: Date | null): void {
+  latestBenchmarkResult = summary;
+  latestBenchmarkTime = createdAt?.toISOString() ?? new Date().toISOString();
+}
+
+export function getLatestBenchmarkTime(): string | null {
+  return latestBenchmarkTime;
+}
+
 const STRATEGY_TO_MODE: Record<string, GeneratorMode> = {
   "Composite": "balanced",
   "Composite Model": "balanced",
@@ -78,6 +87,14 @@ function mulberry32(seed: number): () => number {
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
+}
+
+function fisherYatesShuffle<T>(arr: T[], rng: () => number): T[] {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
 }
 
 function seededRandomCard(rng: () => number): number[] {
@@ -1007,22 +1024,24 @@ export function runBenchmarkValidation(
     const p05 = sortedEnsemble[Math.floor(ensembleAvgs.length * 0.05)];
     const p95 = sortedEnsemble[Math.floor(ensembleAvgs.length * 0.95)];
 
-    const windowResults: { strategy: string; avgMain: number; bestMain: number; pbHits: number }[] = [];
+    const windowResults: { strategy: string; avgMain: number; bestMain: number; pbHits: number; evaluatedDraws: number; skippedDraws: number }[] = [];
 
     for (const strat of strategies) {
       if (strat.name === "Random") {
-        windowResults.push({ strategy: "Random", avgMain: ensembleMean, bestMain: 0, pbHits: 0 });
+        windowResults.push({ strategy: "Random", avgMain: ensembleMean, bestMain: 0, pbHits: 0, evaluatedDraws: testDraws.length, skippedDraws: 0 });
         continue;
       }
 
       let totalMain = 0;
       let bestMain = 0;
       let pbHits = 0;
+      let evaluatedDraws = 0;
 
       if (benchmarkMode === "rolling_walk_forward") {
         for (let i = testDraws.length - 1; i >= 0; i--) {
           const rollingTrain = draws.slice(i + 1);
           if (rollingTrain.length < minTrainDraws) continue;
+          evaluatedDraws++;
           const testDraw = draws[i];
           const actual = testDraw.numbers as number[];
           const actualPB = testDraw.powerball;
@@ -1033,6 +1052,7 @@ export function runBenchmarkValidation(
           if (pb === actualPB) pbHits++;
         }
       } else {
+        evaluatedDraws = testDraws.length;
         for (const testDraw of testDraws) {
           const actual = testDraw.numbers as number[];
           const actualPB = testDraw.powerball;
@@ -1044,12 +1064,15 @@ export function runBenchmarkValidation(
         }
       }
 
-      windowResults.push({ strategy: strat.name, avgMain: totalMain / testDraws.length, bestMain, pbHits });
+      const denominator = evaluatedDraws > 0 ? evaluatedDraws : 1;
+      const skippedDraws = testDraws.length - evaluatedDraws;
+      windowResults.push({ strategy: strat.name, avgMain: totalMain / denominator, bestMain, pbHits, evaluatedDraws, skippedDraws });
     }
 
     for (const r of windowResults) {
       const delta = r.strategy === "Random" ? 0 : Number((r.avgMain - ensembleMean).toFixed(3));
       const withinBand = r.avgMain >= p05 && r.avgMain <= p95;
+      const pbDenom = r.evaluatedDraws > 0 ? r.evaluatedDraws : 1;
       allResults.push({
         strategy: r.strategy,
         windowSize,
@@ -1057,12 +1080,14 @@ export function runBenchmarkValidation(
         trainDraws: trainDraws.length,
         avgMainMatches: Number(r.avgMain.toFixed(2)),
         bestMainMatches: r.bestMain,
-        powerballHitRate: Number(((r.pbHits / windowSize) * 100).toFixed(1)),
+        powerballHitRate: Number(((r.pbHits / pbDenom) * 100).toFixed(1)),
         powerballHits: r.pbHits,
         deltaVsRandom: Number(delta.toFixed(2)),
         deltaVsRandomMean: Number(delta.toFixed(2)),
         beatsRandom: r.strategy !== "Random" && delta > 0,
         withinRandomBand: withinBand,
+        evaluatedDraws: r.evaluatedDraws,
+        skippedDraws: r.skippedDraws,
       });
       if (r.strategy !== "Random") globalEnsembleDeltas.push(delta);
     }
@@ -1120,16 +1145,14 @@ export function runBenchmarkValidation(
   if (runPermutation && validWindows.length > 0) {
     const topStrategies = [...stabilityByStrategy].sort((a, b) => b.avgDelta - a.avgDelta).slice(0, 3).filter(s => s.avgDelta > 0);
     const permRng = mulberry32(seed + 7919);
+    const actualPermRuns = Math.min(permutationRuns, 100);
 
     for (const strat of topStrategies) {
       const observedDelta = strat.avgDelta;
       const nullDeltas: number[] = [];
 
-      for (let p = 0; p < Math.min(permutationRuns, 100); p++) {
-        const shuffled = draws.map(d => ({
-          ...d,
-          numbers: [...(d.numbers as number[])].sort(() => permRng() - 0.5),
-        }));
+      for (let p = 0; p < actualPermRuns; p++) {
+        const shuffled = fisherYatesShuffle([...draws], permRng);
         const wSize = validWindows[0];
         const pTest = shuffled.slice(0, wSize);
         const pTrain = shuffled.slice(wSize);
@@ -1168,6 +1191,9 @@ export function runBenchmarkValidation(
         cautionText: empiricalPValue < 0.05
           ? `${strat.strategy} performance (delta +${observedDelta.toFixed(2)}) exceeds ${percentile}% of permuted baselines. This is suggestive but not proof of a predictive edge — lottery draws are independent events.`
           : `${strat.strategy} performance is within the range of permuted baselines (p=${empiricalPValue}). No evidence that this strategy's performance exceeds random chance.`,
+        shuffleMethod: "fisher_yates",
+        scope: "cross_draw",
+        runs: actualPermRuns,
       });
     }
   }

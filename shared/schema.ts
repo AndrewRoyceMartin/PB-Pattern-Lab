@@ -28,6 +28,29 @@ export const insertUserSchema = createInsertSchema(users).pick({
   password: true,
 });
 
+export const benchmarkRuns = pgTable("benchmark_runs", {
+  id: serial("id").primaryKey(),
+  config: json("config").$type<BenchmarkRunConfig>().notNull(),
+  summary: json("summary").$type<BenchmarkSummary>().notNull(),
+  status: text("status").notNull().default("success"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export interface BenchmarkRunConfig {
+  benchmarkMode: BenchmarkMode;
+  windowSizes: number[];
+  minTrainDraws: number;
+  seed: number;
+  randomBaselineRuns: number;
+  runPermutation: boolean;
+  permutationRuns: number;
+  totalDrawsAvailable: number;
+}
+
+export const insertBenchmarkRunSchema = createInsertSchema(benchmarkRuns).omit({ id: true, createdAt: true });
+export type InsertBenchmarkRun = z.infer<typeof insertBenchmarkRunSchema>;
+export type BenchmarkRun = typeof benchmarkRuns.$inferSelect;
+
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 
@@ -138,6 +161,8 @@ export interface BenchmarkStrategyWindow {
   deltaVsRandomMean: number;
   beatsRandom: boolean;
   withinRandomBand: boolean;
+  evaluatedDraws: number;
+  skippedDraws: number;
 }
 
 export interface BenchmarkStrategyStability {
@@ -158,6 +183,9 @@ export interface BenchmarkPermutationResult {
   percentile: number;
   empiricalPValue: number;
   cautionText: string;
+  shuffleMethod: string;
+  scope: string;
+  runs: number;
 }
 
 export interface BenchmarkSummary {
@@ -314,6 +342,54 @@ export interface FormulaLabResult {
   }[];
   timestamp: string;
 }
+
+// ── Request validation schemas ──
+
+export const benchmarkRequestSchema = z.object({
+  windowSizes: z.array(z.number().int().min(5).max(500)).min(1).max(10).default([20, 40, 60, 100]),
+  minTrainDraws: z.number().int().min(10).max(1000).default(100),
+  benchmarkMode: z.enum(["fixed_holdout", "rolling_walk_forward"]).default("fixed_holdout"),
+  seed: z.number().int().min(0).default(42),
+  randomBaselineRuns: z.number().int().min(1).max(500).default(200),
+  runPermutation: z.boolean().default(false),
+  permutationRuns: z.number().int().min(1).max(200).default(200),
+});
+export type BenchmarkRequest = z.infer<typeof benchmarkRequestSchema>;
+
+const generatorModeEnum = z.enum([
+  "balanced", "anti_popular", "pattern_only", "random_baseline",
+  "most_drawn_all_time", "most_drawn_last_50", "most_drawn_last_100", "most_drawn_last_20",
+  "least_drawn_last_50", "structure_matched_random", "anti_popular_only",
+  "diversity_optimized", "strategy_portfolio",
+  "most_drawn_smoothed_last_50", "most_drawn_smoothed_last_20", "recency_smoothed",
+]);
+
+export const generateRequestSchema = z.object({
+  count: z.number().int().min(1).max(100).default(10),
+  mode: generatorModeEnum.default("balanced"),
+  drawFitWeight: z.number().min(0).max(100).optional(),
+  antiPopWeight: z.number().min(0).max(100).optional(),
+  allocationMethod: z.enum(["equal", "validation_weighted"]).optional(),
+});
+export type GenerateRequest = z.infer<typeof generateRequestSchema>;
+
+export const formulaLabRequestSchema = z.object({
+  features: z.object({
+    freqTotal: z.boolean().default(true),
+    freqL50: z.boolean().default(true),
+    freqL20: z.boolean().default(false),
+    recencySinceSeen: z.boolean().default(true),
+    trendL10: z.boolean().default(true),
+    structureFit: z.boolean().default(true),
+    carryoverAffinity: z.boolean().default(true),
+    antiPopularity: z.boolean().default(false),
+  }).default({}),
+  trainingWindowSize: z.number().int().min(20).max(2000).optional(),
+  searchIterations: z.number().int().min(10).max(500).default(200),
+  regularizationStrength: z.number().min(0).max(5).default(0.5),
+  objective: z.enum(["mean_best_score", "avg_top10_score", "stability_weighted"]).default("mean_best_score"),
+});
+export type FormulaLabRequest = z.infer<typeof formulaLabRequestSchema>;
 
 export interface ApiResponse<T> {
   ok: boolean;

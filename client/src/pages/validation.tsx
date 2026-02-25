@@ -2,11 +2,11 @@ import { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { AlertCircle, Target, GitCompare, LayoutDashboard, TrendingUp, BarChart3, Info, Play, Loader2, Download, Shield, Beaker, Settings2 } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import { AlertCircle, Target, GitCompare, LayoutDashboard, TrendingUp, BarChart3, Info, Play, Loader2, Download, Shield, Beaker, Settings2, History, Eye } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchApi, runBenchmark } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
-import type { ValidationSummary, BenchmarkSummary } from "@shared/schema";
+import type { ValidationSummary, BenchmarkSummary, BenchmarkRunConfig } from "@shared/schema";
 
 const STRATEGY_DESCRIPTIONS: Record<string, string> = {
   "Random": "Random ensemble baseline — averaged across multiple seeded runs for stability.",
@@ -44,12 +44,38 @@ function StrategyName({ name, className }: { name: string; className?: string })
   );
 }
 
+interface BenchmarkHistoryItem {
+  id: number;
+  createdAt: string;
+  status: string;
+  config: BenchmarkRunConfig;
+  verdict: string;
+  strategiesTested: number;
+  windowsTested: number;
+}
+
 export default function Validation() {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const { data: stats } = useQuery({ queryKey: ["/api/stats"], queryFn: () => fetchApi("/api/stats") });
   const { data: validation } = useQuery<ValidationSummary>({ queryKey: ["/api/analysis/validation"], queryFn: () => fetchApi("/api/analysis/validation"), enabled: !!stats?.modernDraws });
+  const { data: benchmarkHistory } = useQuery<BenchmarkHistoryItem[]>({
+    queryKey: ["/api/validation/benchmark/history"],
+    queryFn: () => fetchApi("/api/validation/benchmark/history"),
+  });
 
   const [benchmark, setBenchmark] = useState<BenchmarkSummary | null>(null);
+  const [benchmarkRunMeta, setBenchmarkRunMeta] = useState<{
+    timestamp: string;
+    minTrainDraws: number;
+    permutationRuns: number;
+    windowSizes: number[];
+    mode: string;
+    seed: number;
+    randomBaselineRuns: number;
+    runPermutation: boolean;
+    totalDraws: number;
+  } | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [selectedWindows, setSelectedWindows] = useState([20, 40, 60, 100]);
   const [benchmarkMode, setBenchmarkMode] = useState<"fixed_holdout" | "rolling_walk_forward">("fixed_holdout");
@@ -57,6 +83,7 @@ export default function Validation() {
   const [randomRuns, setRandomRuns] = useState(200);
   const [runPermutation, setRunPermutation] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [loadingRunId, setLoadingRunId] = useState<number | null>(null);
 
   const hasData = validation && validation.verdict !== "insufficient_data";
 
@@ -65,6 +92,18 @@ export default function Validation() {
     try {
       const result = await runBenchmark(selectedWindows, 100, benchmarkMode, seed, randomRuns, runPermutation, 100);
       setBenchmark(result);
+      setBenchmarkRunMeta({
+        timestamp: new Date().toISOString(),
+        minTrainDraws: 100,
+        permutationRuns: 100,
+        windowSizes: [...selectedWindows],
+        mode: benchmarkMode,
+        seed,
+        randomBaselineRuns: randomRuns,
+        runPermutation,
+        totalDraws: result.totalDrawsAvailable,
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/validation/benchmark/history"] });
       toast({ title: "Benchmark complete", description: `Tested ${result.windowSizesTested.length} windows across ${result.stabilityByStrategy.length} strategies [${benchmarkMode === "rolling_walk_forward" ? "rolling" : "fixed"}].` });
     } catch (error: any) {
       toast({ title: "Benchmark failed", description: error.message, variant: "destructive" });
@@ -73,19 +112,59 @@ export default function Validation() {
     }
   };
 
+  const handleLoadRun = async (runId: number) => {
+    setLoadingRunId(runId);
+    try {
+      const result = await fetchApi(`/api/validation/benchmark/${runId}`);
+      if (result?.summary) {
+        setBenchmark(result.summary as BenchmarkSummary);
+        const cfg = result.config as BenchmarkRunConfig;
+        setBenchmarkRunMeta({
+          timestamp: result.createdAt,
+          minTrainDraws: cfg.minTrainDraws,
+          permutationRuns: cfg.permutationRuns,
+          windowSizes: cfg.windowSizes,
+          mode: cfg.benchmarkMode,
+          seed: cfg.seed,
+          randomBaselineRuns: cfg.randomBaselineRuns,
+          runPermutation: cfg.runPermutation,
+          totalDraws: cfg.totalDrawsAvailable,
+        });
+        toast({ title: "Benchmark loaded", description: `Loaded run #${runId} from history.` });
+      }
+    } catch (error: any) {
+      toast({ title: "Failed to load run", description: error.message, variant: "destructive" });
+    } finally {
+      setLoadingRunId(null);
+    }
+  };
+
   const handleExportCSV = () => {
     if (!benchmark) return;
-    const headers = ["Window", "Strategy", "Test Draws", "Train Draws", "Avg Match", "Best Match", "PB Rate%", "Delta vs Random", "Delta vs Mean", "Beats Random", "Within Band"];
+    const headers = ["Window", "Strategy", "Test Draws", "Evaluated", "Skipped", "Train Draws", "Avg Match", "Best Match", "PB Rate%", "Delta vs Random", "Delta vs Mean", "Beats Random", "Within Band"];
     const rows = benchmark.byWindowByStrategy.map(r =>
-      [r.windowSize, r.strategy, r.testDraws, r.trainDraws, r.avgMainMatches, r.bestMainMatches, r.powerballHitRate, r.deltaVsRandom, r.deltaVsRandomMean, r.beatsRandom ? "YES" : "NO", r.withinRandomBand ? "YES" : "NO"].join(",")
+      [r.windowSize, r.strategy, r.testDraws, r.evaluatedDraws, r.skippedDraws, r.trainDraws, r.avgMainMatches, r.bestMainMatches, r.powerballHitRate, r.deltaVsRandom, r.deltaVsRandomMean, r.beatsRandom ? "YES" : "NO", r.withinRandomBand ? "YES" : "NO"].join(",")
     );
     const stabilityHeaders = ["Strategy", "Windows Tested", "Windows Beating", "Windows Losing", "Avg Delta", "Stability Class"];
     const stabilityRows = benchmark.stabilityByStrategy.map(s =>
       [s.strategy, s.windowsTested, s.windowsBeating, s.windowsLosing, s.avgDelta, s.stabilityClass].join(",")
     );
+    const metaRows = [
+      "=== Benchmark Configuration ===",
+      `Benchmark Mode: ${benchmark.benchmarkMode === "rolling_walk_forward" ? "Rolling Walk-Forward" : "Fixed Holdout"}`,
+      `Windows Tested: ${benchmark.windowSizesTested.join(", ")}`,
+      `Seed: ${benchmark.seed}`,
+      `Total Draws Available: ${benchmark.totalDrawsAvailable}`,
+      benchmarkRunMeta ? `Min Train Draws: ${benchmarkRunMeta.minTrainDraws}` : "",
+      benchmarkRunMeta ? `Random Baseline Runs: ${benchmarkRunMeta.randomBaselineRuns}` : "",
+      benchmarkRunMeta ? `Permutation Test: ${benchmarkRunMeta.runPermutation ? "ON" : "OFF"}` : "",
+      benchmarkRunMeta && benchmarkRunMeta.runPermutation ? `Permutation Runs: ${benchmarkRunMeta.permutationRuns}` : "",
+      benchmarkRunMeta ? `Timestamp: ${benchmarkRunMeta.timestamp}` : `Timestamp: ${new Date().toISOString()}`,
+      benchmark.randomEnsemble ? `Random Ensemble: ${benchmark.randomEnsemble.runs} runs, mean=${benchmark.randomEnsemble.mean}, stdDev=${benchmark.randomEnsemble.stdDev}, p05=${benchmark.randomEnsemble.p05}, p95=${benchmark.randomEnsemble.p95}` : "",
+      benchmark.permutationTests?.length ? `Permutation Method: ${benchmark.permutationTests[0].shuffleMethod}, scope=${benchmark.permutationTests[0].scope}` : "",
+    ].filter(Boolean);
     const csv = [
-      `Benchmark Mode: ${benchmark.benchmarkMode}, Seed: ${benchmark.seed}`,
-      benchmark.randomEnsemble ? `Random Ensemble: ${benchmark.randomEnsemble.runs} runs, mean=${benchmark.randomEnsemble.mean}, p05=${benchmark.randomEnsemble.p05}, p95=${benchmark.randomEnsemble.p95}` : "",
+      ...metaRows,
       "",
       "=== Window x Strategy Results ===",
       headers.join(","),
@@ -470,6 +549,64 @@ export default function Validation() {
               </CardContent>
             </Card>
 
+            <Card className="border-border border-primary/20" data-testid="card-benchmark-config">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center">
+                  <Settings2 className="w-4 h-4 mr-2 text-primary" />
+                  Benchmark Config
+                </CardTitle>
+                <CardDescription className="text-xs font-mono">
+                  Reproducibility metadata — same config + seed = identical results
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3 text-sm font-mono">
+                  <div className="flex justify-between md:flex-col md:gap-0.5">
+                    <span className="text-muted-foreground text-xs">Mode</span>
+                    <span className="font-bold text-xs">{benchmark.benchmarkMode === "rolling_walk_forward" ? "Rolling Walk-Forward" : "Fixed Holdout"}</span>
+                  </div>
+                  <div className="flex justify-between md:flex-col md:gap-0.5">
+                    <span className="text-muted-foreground text-xs">Windows</span>
+                    <span className="font-bold text-xs">{benchmark.windowSizesTested.join(", ")}</span>
+                  </div>
+                  <div className="flex justify-between md:flex-col md:gap-0.5">
+                    <span className="text-muted-foreground text-xs">Min Train Draws</span>
+                    <span className="font-bold text-xs">{benchmarkRunMeta?.minTrainDraws ?? 100}</span>
+                  </div>
+                  <div className="flex justify-between md:flex-col md:gap-0.5">
+                    <span className="text-muted-foreground text-xs">Seed</span>
+                    <span className="font-bold text-xs">{benchmark.seed}</span>
+                  </div>
+                  <div className="flex justify-between md:flex-col md:gap-0.5">
+                    <span className="text-muted-foreground text-xs">Random Baseline Runs</span>
+                    <span className="font-bold text-xs">{benchmark.randomEnsemble?.runs ?? benchmarkRunMeta?.randomBaselineRuns ?? "--"}</span>
+                  </div>
+                  <div className="flex justify-between md:flex-col md:gap-0.5">
+                    <span className="text-muted-foreground text-xs">Permutation Test</span>
+                    <span className="font-bold text-xs">
+                      {benchmark.permutationTests?.length
+                        ? `ON (${benchmark.permutationTests[0].runs} runs)`
+                        : "OFF"}
+                    </span>
+                  </div>
+                  {benchmark.permutationTests?.length > 0 && (
+                    <div className="flex justify-between md:flex-col md:gap-0.5">
+                      <span className="text-muted-foreground text-xs">Shuffle Method</span>
+                      <span className="font-bold text-xs">{benchmark.permutationTests[0].shuffleMethod.replace(/_/g, "-")} / {benchmark.permutationTests[0].scope.replace(/_/g, "-")}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between md:flex-col md:gap-0.5">
+                    <span className="text-muted-foreground text-xs">Data Scope</span>
+                    <span className="font-bold text-xs">{benchmark.totalDrawsAvailable} draws</span>
+                  </div>
+                  <div className="flex justify-between md:flex-col md:gap-0.5 col-span-2">
+                    <span className="text-muted-foreground text-xs">Timestamp</span>
+                    <span className="font-bold text-xs">{benchmarkRunMeta?.timestamp ? new Date(benchmarkRunMeta.timestamp).toLocaleString() : "--"}</span>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
             {benchmark.randomEnsemble && (
               <Card className="border-border border-blue-500/20" data-testid="card-random-ensemble">
                 <CardHeader className="pb-3">
@@ -561,7 +698,14 @@ export default function Validation() {
                   <CardTitle className="flex items-center text-lg">
                     <Beaker className="w-5 h-5 mr-2 text-purple-400" /> Permutation Significance Tests
                   </CardTitle>
-                  <CardDescription className="text-xs font-mono">Experimental significance checks — not proof of predictive edge</CardDescription>
+                  <CardDescription className="text-xs font-mono">
+                    Experimental significance checks — not proof of predictive edge
+                    {benchmark.permutationTests[0] && (
+                      <span className="ml-2 text-muted-foreground">
+                        ({benchmark.permutationTests[0].runs} runs · {benchmark.permutationTests[0].shuffleMethod.replace(/_/g, "-")} · {benchmark.permutationTests[0].scope.replace(/_/g, "-")} shuffle)
+                      </span>
+                    )}
+                  </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   {benchmark.permutationTests.map((pt, i) => (
@@ -599,7 +743,7 @@ export default function Validation() {
                   ))}
                   <div className="flex items-start gap-2 p-3 rounded-md bg-purple-500/5 border border-purple-500/20">
                     <Info className="w-4 h-4 text-purple-400 mt-0.5 shrink-0" />
-                    <p className="text-xs text-purple-400/90">Permutation testing breaks the feature-outcome relationship and tests whether observed performance could arise by chance. A low p-value is suggestive but not proof of causality.</p>
+                    <p className="text-xs text-purple-400/90">Permutation testing shuffles entire draw outcomes across timestamps (cross-draw Fisher-Yates) and tests whether observed performance could arise by chance. A low p-value is suggestive but not proof of causality — lottery draws are independent events.</p>
                   </div>
                 </CardContent>
               </Card>
@@ -619,6 +763,9 @@ export default function Validation() {
                     <div key={windowSize} className="mb-6 last:mb-0">
                       <h4 className="text-sm font-mono text-muted-foreground mb-2 border-b border-border/30 pb-1">
                         WINDOW: {windowSize} TEST DRAWS / {windowRows[0]?.trainDraws ?? "?"} TRAINING
+                        {windowRows[0]?.skippedDraws > 0 && (
+                          <span className="ml-2 text-yellow-500">({windowRows[0]?.evaluatedDraws} evaluated, {windowRows[0]?.skippedDraws} skipped)</span>
+                        )}
                       </h4>
                       <div className="rounded-md border border-border/50 overflow-hidden">
                         <table className="w-full text-sm font-mono text-left">
@@ -629,6 +776,7 @@ export default function Validation() {
                               <th className="p-2.5 text-muted-foreground font-medium text-right">Best</th>
                               <th className="p-2.5 text-muted-foreground font-medium text-right">PB Rate</th>
                               <th className="p-2.5 text-muted-foreground font-medium text-right">Delta</th>
+                              <th className="p-2.5 text-muted-foreground font-medium text-center">Eval'd</th>
                               <th className="p-2.5 text-muted-foreground font-medium text-center">Beats?</th>
                               <th className="p-2.5 text-muted-foreground font-medium text-center">In Band?</th>
                             </tr>
@@ -644,6 +792,9 @@ export default function Validation() {
                                 <td className="p-2.5 text-right">{r.powerballHitRate}%</td>
                                 <td className={`p-2.5 text-right font-bold ${r.strategy === "Random" ? "text-muted-foreground" : r.deltaVsRandom > 0 ? "text-green-500" : r.deltaVsRandom < 0 ? "text-red-500" : ""}`}>
                                   {r.strategy === "Random" ? "--" : `${r.deltaVsRandom >= 0 ? "+" : ""}${r.deltaVsRandom}`}
+                                </td>
+                                <td className="p-2.5 text-center">
+                                  <span className={r.skippedDraws > 0 ? "text-yellow-500" : ""}>{r.evaluatedDraws}{r.skippedDraws > 0 ? `/${r.testDraws}` : ""}</span>
                                 </td>
                                 <td className="p-2.5 text-center">
                                   {r.strategy === "Random" ? "--" : r.beatsRandom ? <span className="text-green-500 font-bold">YES</span> : <span className="text-muted-foreground">NO</span>}
@@ -668,6 +819,77 @@ export default function Validation() {
             <p className="font-mono text-sm">{hasData ? "Click RUN BENCHMARK to test all strategies across multiple windows." : "Upload data and run single-window validation first."}</p>
             <p className="text-xs opacity-70 mt-1">Tests windows of 20, 40, 60, and 100 draws with stability classification.</p>
           </div>
+        )}
+
+        {benchmarkHistory && benchmarkHistory.length > 0 && (
+          <Card className="border-border mt-6" data-testid="card-benchmark-history">
+            <CardHeader>
+              <CardTitle className="flex items-center text-lg">
+                <History className="w-5 h-5 mr-2" /> Benchmark History
+              </CardTitle>
+              <CardDescription>Recent benchmark runs — click to load results</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="rounded-md border border-border/50 overflow-hidden">
+                <table className="w-full text-sm font-mono text-left">
+                  <thead className="bg-secondary/50">
+                    <tr>
+                      <th className="p-3 text-muted-foreground font-medium">Run</th>
+                      <th className="p-3 text-muted-foreground font-medium">Timestamp</th>
+                      <th className="p-3 text-muted-foreground font-medium">Mode</th>
+                      <th className="p-3 text-muted-foreground font-medium text-center">Windows</th>
+                      <th className="p-3 text-muted-foreground font-medium text-center">Strategies</th>
+                      <th className="p-3 text-muted-foreground font-medium text-right">Verdict</th>
+                      <th className="p-3 text-muted-foreground font-medium text-center">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/50">
+                    {benchmarkHistory.map((run) => (
+                      <tr key={run.id} className="hover:bg-secondary/20 transition-colors" data-testid={`row-benchmark-history-${run.id}`}>
+                        <td className="p-3 text-muted-foreground">#{run.id}</td>
+                        <td className="p-3 text-muted-foreground text-xs">
+                          {run.createdAt ? new Date(run.createdAt).toLocaleString() : "--"}
+                        </td>
+                        <td className="p-3">
+                          <span className={`inline-block px-2 py-0.5 rounded text-xs font-bold ${
+                            run.config?.benchmarkMode === "rolling_walk_forward"
+                              ? "bg-green-500/20 text-green-500"
+                              : "bg-blue-500/20 text-blue-500"
+                          }`}>
+                            {run.config?.benchmarkMode === "rolling_walk_forward" ? "ROLLING" : "FIXED"}
+                          </span>
+                        </td>
+                        <td className="p-3 text-center">{run.windowsTested}</td>
+                        <td className="p-3 text-center">{run.strategiesTested}</td>
+                        <td className="p-3 text-right">
+                          {run.verdict ? (
+                            <span className="text-xs truncate max-w-[200px] inline-block">{run.verdict.length > 60 ? run.verdict.slice(0, 60) + "…" : run.verdict}</span>
+                          ) : (
+                            <span className="text-muted-foreground">--</span>
+                          )}
+                        </td>
+                        <td className="p-3 text-center">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleLoadRun(run.id)}
+                            disabled={loadingRunId === run.id}
+                            data-testid={`button-load-run-${run.id}`}
+                          >
+                            {loadingRunId === run.id ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Eye className="w-4 h-4" />
+                            )}
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
         )}
       </div>
     </div>
