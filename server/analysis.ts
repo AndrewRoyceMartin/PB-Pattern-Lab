@@ -16,6 +16,7 @@ import {
   type StabilityClass,
   type BenchmarkMode,
   type RandomEnsembleSummary,
+  type RegimeSplitResult,
   type GeneratorMode,
   type GeneratorRecommendation,
   type RecommendationEvidence,
@@ -168,6 +169,86 @@ function buildRecencySmoothedPick(draws: Draw[], alpha: number = 0.3): { picks: 
   const picks = mainScores.slice(0, 7).map(m => m.number).sort((a, b) => a - b);
 
   return { picks, pb: draws[0]?.powerball || 1 };
+}
+
+function buildRecencyGapBalancedPick(draws: Draw[]): { picks: number[]; pb: number } {
+  if (draws.length === 0) return { picks: generateRandomCard(), pb: Math.floor(Math.random() * 20) + 1 };
+  const mainScores: { number: number; score: number }[] = [];
+  for (let n = 1; n <= 35; n++) {
+    let drawsSinceSeen = draws.length;
+    for (let i = 0; i < draws.length; i++) {
+      if ((draws[i].numbers as number[]).includes(n)) { drawsSinceSeen = i; break; }
+    }
+    const gapPct = drawsSinceSeen / Math.max(draws.length, 1);
+    const score = 1 - Math.abs(gapPct - 0.55) * 2;
+    mainScores.push({ number: n, score });
+  }
+  mainScores.sort((a, b) => b.score - a.score || a.number - b.number);
+  return { picks: mainScores.slice(0, 7).map(m => m.number).sort((a, b) => a - b), pb: draws[0]?.powerball || 1 };
+}
+
+function buildRecencyDecayWeightedPick(draws: Draw[], decayRate: number = 0.05): { picks: number[]; pb: number } {
+  if (draws.length === 0) return { picks: generateRandomCard(), pb: Math.floor(Math.random() * 20) + 1 };
+  const mainScores: { number: number; score: number }[] = [];
+  for (let n = 1; n <= 35; n++) {
+    let score = 0;
+    for (let i = 0; i < draws.length; i++) {
+      if ((draws[i].numbers as number[]).includes(n)) {
+        score += Math.exp(-decayRate * i);
+      }
+    }
+    mainScores.push({ number: n, score });
+  }
+  mainScores.sort((a, b) => b.score - a.score || a.number - b.number);
+  const picks = mainScores.slice(0, 7).map(m => m.number).sort((a, b) => a - b);
+  const pbScores: { number: number; score: number }[] = [];
+  for (let n = 1; n <= 20; n++) {
+    let score = 0;
+    for (let i = 0; i < draws.length; i++) {
+      if (draws[i].powerball === n) score += Math.exp(-decayRate * i);
+    }
+    pbScores.push({ number: n, score });
+  }
+  pbScores.sort((a, b) => b.score - a.score);
+  return { picks, pb: pbScores[0]?.number ?? 1 };
+}
+
+function buildRecencyShortWindowPick(draws: Draw[], windowSize: number = 15): { picks: number[]; pb: number } {
+  const window = draws.slice(0, Math.min(windowSize, draws.length));
+  if (window.length === 0) return { picks: generateRandomCard(), pb: Math.floor(Math.random() * 20) + 1 };
+  const mainScores: { number: number; score: number }[] = [];
+  for (let n = 1; n <= 35; n++) {
+    let drawsSinceSeen = window.length;
+    for (let i = 0; i < window.length; i++) {
+      if ((window[i].numbers as number[]).includes(n)) { drawsSinceSeen = i; break; }
+    }
+    const recencyScore = 1 - (drawsSinceSeen / window.length);
+    mainScores.push({ number: n, score: recencyScore });
+  }
+  mainScores.sort((a, b) => b.score - a.score || a.number - b.number);
+  return { picks: mainScores.slice(0, 7).map(m => m.number).sort((a, b) => a - b), pb: window[0]?.powerball || 1 };
+}
+
+function buildCompositeNoFrequencyPick(draws: Draw[]): { picks: number[]; pb: number } {
+  if (draws.length === 0) return { picks: generateRandomCard(), pb: Math.floor(Math.random() * 20) + 1 };
+  const freqs = computeNumberFrequencies(draws);
+  const scored = freqs.map(f => ({
+    number: f.number,
+    score: -f.drawsSinceSeen * 1.5 + f.rollingTrend * 3,
+  }));
+  const sorted = [...scored].sort((a, b) => b.score - a.score);
+  return { picks: sorted.slice(0, 7).map(f => f.number).sort((a, b) => a - b), pb: draws[0]?.powerball || 1 };
+}
+
+function buildCompositeRecencyHeavyPick(draws: Draw[]): { picks: number[]; pb: number } {
+  if (draws.length === 0) return { picks: generateRandomCard(), pb: Math.floor(Math.random() * 20) + 1 };
+  const freqs = computeNumberFrequencies(draws);
+  const scored = freqs.map(f => ({
+    number: f.number,
+    score: -f.drawsSinceSeen * 3 + f.rollingTrend * 2 + f.last10Freq * 1,
+  }));
+  const sorted = [...scored].sort((a, b) => b.score - a.score);
+  return { picks: sorted.slice(0, 7).map(f => f.number).sort((a, b) => a - b), pb: topPb(getPbFreqs(draws.slice(0, 20))) };
 }
 
 export function getGeneratorRecommendation(): GeneratorRecommendation {
@@ -970,6 +1051,26 @@ function getStrategyRegistry(): { name: string; fn: StrategyFn }[] {
       name: "Recency Smoothed",
       fn: (train) => buildRecencySmoothedPick(train),
     },
+    {
+      name: "Recency Gap Balanced",
+      fn: (train) => buildRecencyGapBalancedPick(train),
+    },
+    {
+      name: "Recency Decay Weighted",
+      fn: (train) => buildRecencyDecayWeightedPick(train),
+    },
+    {
+      name: "Recency Short Window",
+      fn: (train) => buildRecencyShortWindowPick(train),
+    },
+    {
+      name: "Composite No-Frequency",
+      fn: (train) => buildCompositeNoFrequencyPick(train),
+    },
+    {
+      name: "Composite Recency-Heavy",
+      fn: (train) => buildCompositeRecencyHeavyPick(train),
+    },
   ];
 }
 
@@ -981,9 +1082,16 @@ export function runBenchmarkValidation(
   seed: number = 42,
   randomBaselineRuns: number = 200,
   runPermutation: boolean = false,
-  permutationRuns: number = 200
+  permutationRuns: number = 200,
+  selectedStrategies?: string[],
+  presetName?: string,
+  permutationStrategies?: string[],
+  regimeSplits: boolean = false
 ): BenchmarkSummary {
-  const strategies = getStrategyRegistry();
+  const allStrategies = getStrategyRegistry();
+  const strategies = selectedStrategies && selectedStrategies.length > 0
+    ? allStrategies.filter(s => selectedStrategies.includes(s.name) || s.name === "Random")
+    : allStrategies;
   const validWindows = windowSizes.filter(w => draws.length >= w + minTrainDraws);
 
   if (validWindows.length === 0) {
@@ -1143,9 +1251,14 @@ export function runBenchmarkValidation(
 
   let permutationTests: BenchmarkPermutationResult[] = [];
   if (runPermutation && validWindows.length > 0) {
-    const topStrategies = [...stabilityByStrategy].sort((a, b) => b.avgDelta - a.avgDelta).slice(0, 3).filter(s => s.avgDelta > 0);
+    let topStrategies: BenchmarkStrategyStability[];
+    if (permutationStrategies && permutationStrategies.length > 0) {
+      topStrategies = stabilityByStrategy.filter(s => permutationStrategies.includes(s.strategy));
+    } else {
+      topStrategies = [...stabilityByStrategy].sort((a, b) => b.avgDelta - a.avgDelta).slice(0, 3).filter(s => s.avgDelta > 0);
+    }
     const permRng = mulberry32(seed + 7919);
-    const actualPermRuns = Math.min(permutationRuns, 100);
+    const actualPermRuns = Math.min(permutationRuns, 1000);
 
     for (const strat of topStrategies) {
       const observedDelta = strat.avgDelta;
@@ -1209,6 +1322,34 @@ export function runBenchmarkValidation(
     overallVerdict = `[${modeLabel.toUpperCase()}] Potential signals detected: ${names}. Classification: ${classes}. Tested against random ensemble (${randomBaselineRuns} runs). Monitor over time.`;
   }
 
+  let regimeSplitResults: RegimeSplitResult[] | undefined;
+  if (regimeSplits && draws.length >= 60) {
+    const third = Math.floor(draws.length / 3);
+    const regimes: { name: string; slice: Draw[] }[] = [
+      { name: "recent_modern", slice: draws.slice(0, third) },
+      { name: "mid_modern", slice: draws.slice(third, third * 2) },
+      { name: "older_modern", slice: draws.slice(third * 2) },
+    ];
+    regimeSplitResults = [];
+    for (const regime of regimes) {
+      const rDraws = regime.slice;
+      if (rDraws.length < 30) continue;
+      const rWindows = windowSizes.filter(w => rDraws.length >= w + Math.min(minTrainDraws, Math.floor(rDraws.length * 0.4)));
+      if (rWindows.length === 0) continue;
+      const rMinTrain = Math.min(minTrainDraws, Math.floor(rDraws.length * 0.4));
+      const rResult = runBenchmarkValidation(rDraws, rWindows, rMinTrain, benchmarkMode, seed, Math.min(randomBaselineRuns, 100), false, 0, selectedStrategies, undefined, undefined, false);
+      const firstDate = rDraws[rDraws.length - 1]?.drawDate || "?";
+      const lastDate = rDraws[0]?.drawDate || "?";
+      regimeSplitResults.push({
+        regime: regime.name,
+        drawCount: rDraws.length,
+        dateRange: `${firstDate} – ${lastDate}`,
+        stabilityByStrategy: rResult.stabilityByStrategy,
+        byWindowByStrategy: rResult.byWindowByStrategy,
+      });
+    }
+  }
+
   return {
     byWindowByStrategy: allResults,
     stabilityByStrategy,
@@ -1219,6 +1360,9 @@ export function runBenchmarkValidation(
     seed,
     randomEnsemble,
     permutationTests,
+    presetName,
+    selectedStrategies: selectedStrategies || undefined,
+    regimeSplits: regimeSplitResults,
   };
 }
 

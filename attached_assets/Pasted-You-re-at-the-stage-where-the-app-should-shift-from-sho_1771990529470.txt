@@ -1,0 +1,443 @@
+You’re at the stage where the app should shift from “show everything” to “show the verdict first, details on demand.”
+That will make it much easier to spot what matters (and export the deeper data when we want to investigate).
+
+Next Phase: Recency Signal Verification Sprint + Results-First UI
+Phase goals
+
+Stress-test the recency/composite signal (is it real or noise?)
+
+Reduce screen clutter (show summary first)
+
+Add exports for deep analysis (so we can drill in properly)
+
+Replit Plan Work — Recency Signal Verification Sprint (copy/paste)
+Task 1 — Create a Recency Signal Verification benchmark preset
+Scope
+
+Add a benchmark preset that runs only the strategies currently showing possible/weak edge.
+
+Strategies to include (default preset)
+
+recency_only
+
+recency_smoothed
+
+composite
+
+most_drawn_last_20
+
+smoothed_most_drawn_last_20
+
+Comparator baselines (always include)
+
+random
+
+structure_matched_random
+
+anti_popular_only (practical comparator)
+
+diversity_optimized (set-level comparator)
+
+Why
+
+This reduces noise and focuses the benchmark on the only strategy family showing repeated positives.
+
+Acceptance criteria
+
+“Recency Signal Verification” preset appears in Validation UI
+
+Running preset automatically selects the above strategies
+
+Results clearly label it as a focused verification run
+
+Task 2 — Add recency ablation variants (find what is actually working)
+Scope
+
+Break recency/composite into variants so we can identify which recency formulation is driving the signal.
+
+New strategies (minimum)
+
+recency_gap_balanced (prefer moderate gaps, not extreme overdue)
+
+recency_decay_weighted (exponential decay weighting)
+
+recency_short_window (e.g. last 10–20 emphasis)
+
+composite_no_frequency (ablation)
+
+composite_recency_heavy (ablation)
+
+Why
+
+If Composite is winning because recency is carrying it, this will expose that quickly.
+
+Acceptance criteria
+
+New variants appear in validation benchmark
+
+Benchmarks run without breaking existing modes
+
+Results table can compare ablation variants to base composite
+
+Task 3 — Add stronger significance testing for recency/composite only
+Scope
+
+Use permutation testing specifically on the recency/composite candidates (not every strategy every time).
+
+Features
+
+Multi-strategy permutation run for selected strategies
+
+Configurable runs (default 200, advanced 500/1000)
+
+Metric selection (default = delta vs random on primary benchmark metric)
+
+Output empirical p-value / percentile per strategy
+
+Why
+
+This is the fastest way to confirm or kill the apparent recency edge.
+
+Acceptance criteria
+
+Permutation results can be run for recency/composite strategies in one action
+
+Results display p-value/percentile per strategy
+
+UI labels results as “supporting evidence only” (not proof)
+
+Task 4 — Add regime split testing for recency signals
+Scope
+
+Test recency/composite performance across different historical segments.
+
+Suggested splits (v1)
+
+recent_modern
+
+mid_modern
+
+older_modern
+
+full_modern (current baseline)
+
+Why
+
+A real signal should be more stable across regimes; a fake one often appears only in one period.
+
+Acceptance criteria
+
+Validation can run selected benchmark across regime splits
+
+Summary shows performance by regime
+
+Stability summary includes regime consistency notes
+
+Task 5 — Build a “Results First” Validation UI (summary-first, details on demand)
+Scope
+
+Reduce clutter by default and hide diagnostics/details behind expandable sections.
+
+New UI layout (recommended)
+A) Top Summary (default visible)
+
+Best strategies this run (ranked)
+
+Possible edge candidates (with simple verdict badges)
+
+No-edge / underperforming grouped summary
+
+Recommendation impact (what generator should use)
+
+B) Key Results Table (default visible)
+
+Columns only:
+
+Strategy
+
+Stability
+
+Tested / Beating / Losing
+
+Avg Delta
+
+Confidence / Significance (if available)
+
+C) Details (collapsed by default)
+
+Sections:
+
+per-window metrics
+
+random ensemble bands
+
+permutation outputs
+
+diagnostics/diversity metrics
+
+raw benchmark metadata
+
+Why
+
+You’ll see the answer immediately, but still have the detail when needed.
+
+Acceptance criteria
+
+Validation page opens to summary-first view
+
+Details are hidden by default and expandable
+
+Existing metrics remain accessible via details panels
+
+Task 6 — Add export options for benchmark + verification results
+Scope
+
+Add export buttons so you can send results out for deeper analysis (and I can help interpret / drill further).
+
+Export formats (v1)
+
+CSV Summary (strategy-level results)
+
+CSV Detailed (window-level results)
+
+JSON Full Results (all metadata, diagnostics, permutation summaries)
+
+CSV Permutation Results (optional if run)
+
+Why
+
+This is exactly what you asked for: concise UI + deep export for analysis.
+
+Acceptance criteria
+
+Export buttons are visible in Validation results area
+
+Files download with timestamp + benchmark id in filename
+
+Exports include benchmark metadata (mode, seed, windows, random runs, date scope)
+
+Exported files can be re-imported/analyzed externally
+
+Task 7 — Add “Show Details” toggle and persistent UI preference
+Scope
+
+Make detail visibility a user toggle and remember preference.
+
+Features
+
+Toggle: Show detailed diagnostics
+
+Default = off
+
+Persist in local storage (or simple UI state memory)
+
+Why
+
+Keeps your workspace clean without removing useful information.
+
+Acceptance criteria
+
+Details remain hidden on reload if preference saved
+
+Toggling does not rerun benchmark
+
+Export buttons work regardless of details visibility state
+
+Task 8 — Add a compact “Drill Down Queue” / Notes field for follow-up analysis
+Scope
+
+Add a lightweight way to mark findings you want to investigate further.
+
+Example
+
+From a benchmark result row:
+
+“Queue for drill-down”
+
+Attach note like: Recency Smoothed beat random in all windows; test p=500 permutations
+
+Why
+
+This gives us a structured workflow:
+
+observe signal
+
+export
+
+drill down next sprint
+
+Acceptance criteria
+
+Can mark at least one strategy/result for follow-up
+
+Queue is visible in validation page (or a small panel)
+
+Export includes queued notes (optional but useful)
+
+UI simplification plan (what you asked for, directly)
+Default view should show only this
+Validation Result Summary
+
+Top candidate(s): Composite, Recency Smoothed, Recency Only
+
+Verdict: Possible edge (pending significance)
+
+Generator recommendation: Strategy Portfolio (validation-weighted, recency-heavy)
+
+Run details: 4 windows, rolling walk-forward, random ensemble N=___
+
+Compact Table
+
+Strategy
+
+Stability
+
+Avg Delta
+
+Beating/Losing
+
+Significance (if run)
+
+That’s it by default.
+
+Hidden under “Show Details”
+
+per-window tables
+
+benchmark metadata
+
+random ensemble band stats
+
+permutation null distributions
+
+diversity diagnostics
+
+formula lab internals
+
+This is the right UX for where you are now.
+
+Recommended exports (practical)
+
+When you run the recency verification sprint, export these and send me the summary/detailed CSVs:
+
+1) verification_summary.csv
+
+Contains:
+
+strategy
+
+stability
+
+avg delta
+
+tested/beating/losing
+
+significance p-value (if available)
+
+regime split summary
+
+benchmark metadata columns
+
+2) verification_windows.csv
+
+Contains one row per:
+
+strategy × window × regime
+with metrics + deltas
+
+3) verification_permutation.csv (if run)
+
+Contains:
+
+strategy
+
+metric
+
+observed
+
+null_mean
+
+null_std
+
+percentile
+
+empirical_p
+
+runs
+
+seed
+
+4) verification_full.json
+
+Contains everything (for audit/replay)
+
+Recency-focused next strategy ideas (do these before adding unrelated new strategies)
+Priority recency variants
+
+Recency Gap Balanced
+
+Prefer numbers not just “most recent” or “most overdue,” but a target gap band
+
+Recency Decay Weighted
+
+Weight recent draws exponentially (tunable decay)
+
+Recency + Light Structure
+
+Recency score with small structure-fit weight only
+
+Composite No-Frequency
+
+If performance stays strong, frequency is probably not helping
+
+PB Recency Separate
+
+Model PB recency independently from mains (important)
+
+Recommendation engine update (based on your current table)
+
+Given your results, the generator recommendation should become:
+
+Default recommendation
+
+Strategy Portfolio (Validation-Weighted, Recency-Heavy)
+
+Example allocation (10 games)
+
+3 × Composite
+
+3 × Recency Smoothed
+
+2 × Recency Only
+
+1 × Smoothed Most Drawn (L20)
+
+1 × Anti-Popular / Diversity Optimized (practical diversification)
+
+Then apply final diversity optimization across all 10.
+
+That reflects your actual evidence.
+
+Caveated summary wording you can use in the app right now
+
+Current benchmark results show repeat positive performance for recency-based and composite strategies across four test windows. These are treated as possible edges pending stronger significance and regime-stability testing. Frequency-heavy strategies remain underperforming or neutral.
+
+That is accurate and strong.
+
+Suggested implementation order (fastest payoff)
+
+Task 5 Results-first UI
+
+Task 6 Exports
+
+Task 1 Recency verification preset
+
+Task 2 Recency ablations
+
+Task 3 Significance focus (recency/composite)
+
+Task 4 Regime splits
+
+Task 7 Details toggle persistence
+
+Task 8 Drill-down queue

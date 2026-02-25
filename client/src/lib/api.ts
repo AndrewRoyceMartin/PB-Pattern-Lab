@@ -48,19 +48,37 @@ export async function generatePicks(mode: GeneratorMode, drawFitWeight: number, 
   return json.data;
 }
 
-export async function runBenchmark(
-  windowSizes: number[] = [20, 40, 60, 100],
-  minTrainDraws: number = 100,
-  benchmarkMode: "fixed_holdout" | "rolling_walk_forward" = "fixed_holdout",
-  seed: number = 42,
-  randomBaselineRuns: number = 200,
-  runPermutation: boolean = false,
-  permutationRuns: number = 200
-) {
+export interface BenchmarkOptions {
+  windowSizes?: number[];
+  minTrainDraws?: number;
+  benchmarkMode?: "fixed_holdout" | "rolling_walk_forward";
+  seed?: number;
+  randomBaselineRuns?: number;
+  runPermutation?: boolean;
+  permutationRuns?: number;
+  selectedStrategies?: string[];
+  presetName?: string;
+  permutationStrategies?: string[];
+  regimeSplits?: boolean;
+}
+
+export async function runBenchmark(opts: BenchmarkOptions = {}) {
   const res = await fetch("/api/validation/benchmark", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ windowSizes, minTrainDraws, benchmarkMode, seed, randomBaselineRuns, runPermutation, permutationRuns }),
+    body: JSON.stringify({
+      windowSizes: opts.windowSizes ?? [20, 40, 60, 100],
+      minTrainDraws: opts.minTrainDraws ?? 100,
+      benchmarkMode: opts.benchmarkMode ?? "fixed_holdout",
+      seed: opts.seed ?? 42,
+      randomBaselineRuns: opts.randomBaselineRuns ?? 200,
+      runPermutation: opts.runPermutation ?? false,
+      permutationRuns: opts.permutationRuns ?? 200,
+      selectedStrategies: opts.selectedStrategies,
+      presetName: opts.presetName,
+      permutationStrategies: opts.permutationStrategies,
+      regimeSplits: opts.regimeSplits ?? false,
+    }),
   });
   const json = await res.json();
   if (!res.ok || !json.ok) {

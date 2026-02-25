@@ -45,6 +45,10 @@ export interface BenchmarkRunConfig {
   runPermutation: boolean;
   permutationRuns: number;
   totalDrawsAvailable: number;
+  selectedStrategies?: string[];
+  presetName?: string;
+  permutationStrategies?: string[];
+  regimeSplits?: boolean;
 }
 
 export const insertBenchmarkRunSchema = createInsertSchema(benchmarkRuns).omit({ id: true, createdAt: true });
@@ -188,6 +192,14 @@ export interface BenchmarkPermutationResult {
   runs: number;
 }
 
+export interface RegimeSplitResult {
+  regime: string;
+  drawCount: number;
+  dateRange: string;
+  stabilityByStrategy: BenchmarkStrategyStability[];
+  byWindowByStrategy: BenchmarkStrategyWindow[];
+}
+
 export interface BenchmarkSummary {
   byWindowByStrategy: BenchmarkStrategyWindow[];
   stabilityByStrategy: BenchmarkStrategyStability[];
@@ -198,6 +210,9 @@ export interface BenchmarkSummary {
   seed: number;
   randomEnsemble: RandomEnsembleSummary | null;
   permutationTests: BenchmarkPermutationResult[];
+  presetName?: string;
+  selectedStrategies?: string[];
+  regimeSplits?: RegimeSplitResult[];
 }
 
 export type GeneratorMode = "balanced" | "anti_popular" | "pattern_only" | "random_baseline" | "most_drawn_all_time" | "most_drawn_last_50" | "most_drawn_last_100" | "most_drawn_last_20" | "least_drawn_last_50" | "structure_matched_random" | "anti_popular_only" | "diversity_optimized" | "strategy_portfolio" | "most_drawn_smoothed_last_50" | "most_drawn_smoothed_last_20" | "recency_smoothed";
@@ -352,7 +367,11 @@ export const benchmarkRequestSchema = z.object({
   seed: z.number().int().min(0).default(42),
   randomBaselineRuns: z.number().int().min(1).max(500).default(200),
   runPermutation: z.boolean().default(false),
-  permutationRuns: z.number().int().min(1).max(200).default(200),
+  permutationRuns: z.number().int().min(1).max(1000).default(200),
+  selectedStrategies: z.array(z.string()).optional(),
+  presetName: z.string().optional(),
+  permutationStrategies: z.array(z.string()).optional(),
+  regimeSplits: z.boolean().default(false),
 });
 export type BenchmarkRequest = z.infer<typeof benchmarkRequestSchema>;
 

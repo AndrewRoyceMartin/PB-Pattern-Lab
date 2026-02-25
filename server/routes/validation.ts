@@ -21,17 +21,18 @@ export function registerValidationRoutes(app: Express): void {
           errors: parsed.error.issues.map(i => ({ path: i.path.join("."), message: i.message })),
         });
       }
-      const { windowSizes, minTrainDraws, benchmarkMode, seed, randomBaselineRuns, runPermutation, permutationRuns } = parsed.data;
+      const { windowSizes, minTrainDraws, benchmarkMode, seed, randomBaselineRuns, runPermutation, permutationRuns, selectedStrategies, presetName, permutationStrategies, regimeSplits } = parsed.data;
       const draws = await storage.getModernDraws();
       if (draws.length < 50) {
         return res.status(400).json({ ok: false, message: `Only ${draws.length} modern draws available. Need at least 120 (min window + min training) for benchmark.` });
       }
-      const results = runBenchmarkValidation(draws, windowSizes, minTrainDraws, benchmarkMode, seed, randomBaselineRuns, runPermutation, permutationRuns);
+      const results = runBenchmarkValidation(draws, windowSizes, minTrainDraws, benchmarkMode, seed, randomBaselineRuns, runPermutation, permutationRuns, selectedStrategies, presetName, permutationStrategies, regimeSplits);
       storeBenchmarkResult(results);
 
       const config: BenchmarkRunConfig = {
         benchmarkMode, windowSizes, minTrainDraws, seed, randomBaselineRuns,
         runPermutation, permutationRuns, totalDrawsAvailable: draws.length,
+        selectedStrategies, presetName, permutationStrategies, regimeSplits,
       };
       const run = await storage.saveBenchmarkRun(config, results);
       res.json(apiResponse(draws, { ...results, benchmarkRunId: run.id, benchmarkRunTimestamp: run.createdAt }));

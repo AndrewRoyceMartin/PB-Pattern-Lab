@@ -32,7 +32,7 @@ Preferred communication style: Simple, everyday language.
 - **Request Validation**: Zod schemas validate all POST endpoints (benchmark, generator, formula lab) with structured 400 error responses on invalid input.
 - **Core Engines**:
   - **Pattern Discovery**: Extracts frequency, structure, carryover, and rolling drift patterns.
-  - **Validation**: Walk-forward backtesting using 16 strategies, multi-window benchmarking with seeded random ensemble (configurable runs/seed), fixed holdout and rolling walk-forward modes, Fisher-Yates permutation significance testing (cross-draw null model), stability classification (possible_edge/weak_edge/no_edge/underperforming).
+  - **Validation**: Walk-forward backtesting using 20 strategies (15 original + 5 recency ablation variants), multi-window benchmarking with seeded random ensemble (configurable runs/seed), fixed holdout and rolling walk-forward modes, Fisher-Yates permutation significance testing (cross-draw null model, focused strategy targeting up to 1000 runs), stability classification (possible_edge/weak_edge/no_edge/underperforming), benchmark presets (Recency Signal Verification), regime split testing (recent/mid/older thirds).
   - **Generator**: Ranked picks via handler registry map (`server/generator-registry.ts`), 16 modes including frequency benchmarks, Bayesian-smoothed strategies (Smoothed L50/L20, Recency Smoothed), Strategy Portfolio (multi-strategy mixed pack), Structure-Matched Random, Anti-Popular Only, Diversity Optimized, and Random Baseline.
   - **Formula Lab**: Weighted feature formula optimization, walk-forward replay, Monte Carlo permutation test, overfit risk diagnostics.
 - **Generator Registry**: `server/generator-registry.ts` — typed handler map (`Record<GeneratorMode, GeneratorHandler>`) for all 16 modes. Adding a new mode requires registering one handler function.
@@ -59,6 +59,8 @@ Preferred communication style: Simple, everyday language.
 9. **Standardized API responses**: Consistent `{ok, meta, data}` format for all API endpoints.
 10. **Rolling benchmark correctness**: Rolling walk-forward mode uses `evaluatedDraws` (not total test draws) as denominator, correctly handling skipped draws due to insufficient training data.
 11. **Generator handler registry**: Typed handler map replaces if/else dispatch chain, making it trivial to add new generation modes.
+12. **Results-first UI**: Validation page uses three-tier layout — top summary always visible, compact strategy table always visible, detail sections (config, ensemble, permutation, per-window) collapsed by default with "Show Details" toggle persisted to localStorage.
+13. **Drill-down queue**: Bookmark strategies for follow-up with notes, persisted to localStorage, included in JSON export for research continuity.
 
 ## External Dependencies
 
@@ -85,13 +87,33 @@ Preferred communication style: Simple, everyday language.
 - **Random baseline**: Seeded ensemble (default 200 runs, configurable up to 500) using mulberry32 PRNG. Ensemble mean replaces single-run random baseline. 5th/95th percentile bands computed.
 - **Delta computation**: `deltaVsRandomMean` compares strategy average against ensemble mean. `withinRandomBand` flags whether performance falls within p05-p95 range.
 
-### Permutation Testing (v2)
+### Permutation Testing (v2 + focused targeting)
 - **Shuffle method**: Fisher-Yates (Knuth) using seeded PRNG — replaces biased `sort(() => rng - 0.5)`.
 - **Null model**: Cross-draw permutation — shuffles entire draw objects across temporal positions, breaking the draw-timestamp relationship (stronger null than within-draw number scrambling).
-- **Scope**: Tests top-3 strategies by average delta. Up to 100 permutation runs per strategy.
+- **Scope**: Default tests top-3 strategies by average delta. Focused mode targets specific strategies via `permutationStrategies` param (up to 1000 runs).
 - **Output**: Empirical p-value, null distribution stats (mean, std), percentile, caution text.
 - **Metadata**: API response includes `shuffleMethod`, `scope`, `runs` for each permutation result.
 - **Caveat**: Permutation testing provides supporting evidence only — a low p-value does not prove predictive edge for lottery draws.
+
+### Recency Ablation Strategies
+- 5 variants added for recency signal investigation:
+  - `Recency Gap Balanced` — prefers numbers with moderate gap (40-70th percentile)
+  - `Recency Decay Weighted` — exponential decay weighting on recency
+  - `Recency Short Window` — recency emphasis on last 10-20 draws only
+  - `Composite No-Frequency` — composite ablation removing frequency signal
+  - `Composite Recency-Heavy` — composite with 60% recency, 20% trend, 20% structure
+- These are benchmark-only strategies (no generator mode yet)
+
+### Benchmark Presets
+- **Recency Signal Verification**: Tests 14 strategies (recency variants + baselines) with focused permutation on 8 recency/composite strategies. Designed to isolate whether recency signals are real or noise.
+- `selectedStrategies` optional field filters which strategies to benchmark (runs all if omitted).
+- `presetName` labels the benchmark run for identification.
+
+### Regime Split Testing
+- Divides modern draws into thirds by draw date: `recent_modern`, `mid_modern`, `older_modern`.
+- Each regime runs independently with capped `minTrainDraws`.
+- Stable signals should persist across regimes; regime-dependent signals are likely noise.
+- Enabled via `regimeSplits: true` in benchmark request.
 
 ### Benchmark Persistence
 - Results stored in `benchmark_runs` table with config JSON and summary JSON.
@@ -101,24 +123,25 @@ Preferred communication style: Simple, everyday language.
 - Detail endpoint: `GET /api/validation/benchmark/:id` returns full run data.
 
 ### API Request Validation
-- **POST /api/validation/benchmark**: Zod schema validates windowSizes (array of ints 5-500, max 10), minTrainDraws (10-1000), benchmarkMode enum, seed, randomBaselineRuns (1-500), runPermutation boolean, permutationRuns (1-200).
+- **POST /api/validation/benchmark**: Zod schema validates windowSizes (array of ints 5-500, max 10), minTrainDraws (10-1000), benchmarkMode enum, seed, randomBaselineRuns (1-500), runPermutation boolean, permutationRuns (1-1000), selectedStrategies (optional string array), presetName (optional string), permutationStrategies (optional string array), regimeSplits (boolean, default false).
 - **POST /api/generate**: Zod schema validates count (1-100), mode (16 generator modes), optional weights (0-100), allocationMethod.
 - **POST /api/formula-lab/optimize**: Zod schema validates features, trainingWindowSize, searchIterations (10-500), regularizationStrength, objective.
 - Invalid payloads return structured 400 errors with field-level messages.
 
 ## Recent Changes
 
+### Phase: Recency Signal Verification Sprint (2026-02-25)
+- **T001**: Results-first Validation UI — three-tier layout (summary always visible → compact table → details collapsed), Show Details toggle persisted to localStorage
+- **T002**: Comprehensive export options — CSV Summary, CSV Detailed (window×strategy), CSV Permutation, JSON Full (includes drill-down queue), all with benchmark metadata
+- **T003**: 5 recency ablation strategies — Recency Gap Balanced, Recency Decay Weighted, Recency Short Window, Composite No-Frequency, Composite Recency-Heavy
+- **T004**: Benchmark preset system — selectedStrategies filter, presetName labeling, Recency Signal Verification preset (14 strategies)
+- **T005**: Focused permutation testing — `permutationStrategies` param targets specific strategies, max 1000 runs
+- **T006**: Regime split testing — divides modern draws into thirds, stability across historical periods
+- **T007**: Drill-down queue — bookmark strategies for follow-up, add notes, persisted in localStorage, included in JSON export
+- **T008**: Updated replit.md with methodology and infrastructure documentation
+
 ### Phase: Validation Hardening + Research Infrastructure (2026-02-25)
-- **T001**: Fixed rolling benchmark averaging — uses `evaluatedDraws` as denominator, tracks `skippedDraws`, surfaces in UI
-- **T002**: Upgraded permutation testing — Fisher-Yates shuffle, cross-draw null model, method metadata in API response
-- **T003**: Added Zod request validation for benchmark, generator, and Formula Lab endpoints
-- **T004**: Benchmark persistence — `benchmark_runs` DB table, recommendation engine loads from DB on restart, stale-benchmark warning, history/detail API endpoints
-- **T005**: Refactored routes.ts into 5 focused route modules under `server/routes/`
-- **T006**: Replaced generator if/else chain with typed handler registry (`server/generator-registry.ts`)
-- **T007**: Replaced manual CSV splitting with `csv-parse` library for robust parsing
-- **T008**: Added benchmark metadata/reproducibility panel in Validation UI with enhanced CSV export
-- **T009**: Added benchmark history viewer (list recent runs, load details into benchmark view)
-- **T010**: Updated replit.md with methodology and infrastructure documentation
+- Fixed rolling benchmark averaging, Fisher-Yates permutation v2, Zod validation, benchmark persistence, route modules, generator registry, csv-parse upgrade, benchmark metadata UI, benchmark history viewer
 
 ### Prior Phases
 - **2026-02-24**: Forecasting Quality Upgrade Sprint — seeded ensemble baselines, Bayesian-smoothed strategies (Smoothed L50/L20, Recency Smoothed), Strategy Portfolio mode, permutation significance testing v1
