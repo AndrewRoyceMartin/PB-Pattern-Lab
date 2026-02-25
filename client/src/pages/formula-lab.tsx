@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
@@ -31,6 +31,82 @@ function OverfitBadge({ risk }: { risk: string }) {
   };
   const c = config[risk] || config.inconclusive;
   return <span className={`inline-block px-2 py-0.5 rounded border text-xs font-mono font-bold uppercase ${c.className}`} data-testid="badge-overfit-risk">{c.label}</span>;
+}
+
+const OPTIMIZER_STAGES = [
+  { id: "search", label: "Searching weight combinations", duration: 0.45 },
+  { id: "replay", label: "Walk-forward replay", duration: 0.30 },
+  { id: "permutation", label: "Monte Carlo permutation test", duration: 0.20 },
+  { id: "scoring", label: "Scoring and ranking", duration: 0.05 },
+] as const;
+
+function OptimizerProgress({ iterations, isRunning }: { iterations: number; isRunning: boolean }) {
+  const [progress, setProgress] = useState(0);
+  const [stageIndex, setStageIndex] = useState(0);
+  const startTime = useRef(Date.now());
+  const estimatedMs = useRef(Math.max(3000, iterations * 15));
+
+  useEffect(() => {
+    if (!isRunning) {
+      setProgress(0);
+      setStageIndex(0);
+      return;
+    }
+    startTime.current = Date.now();
+    estimatedMs.current = Math.max(3000, iterations * 15);
+    const interval = setInterval(() => {
+      const elapsed = Date.now() - startTime.current;
+      const rawProgress = Math.min(elapsed / estimatedMs.current, 0.95);
+      setProgress(rawProgress);
+      let cumulative = 0;
+      let newStage = 0;
+      for (let i = 0; i < OPTIMIZER_STAGES.length; i++) {
+        cumulative += OPTIMIZER_STAGES[i].duration;
+        if (rawProgress < cumulative) { newStage = i; break; }
+        newStage = i;
+      }
+      setStageIndex(newStage);
+    }, 100);
+    return () => clearInterval(interval);
+  }, [isRunning, iterations]);
+
+  if (!isRunning) return null;
+
+  const stage = OPTIMIZER_STAGES[stageIndex];
+  const pct = Math.round(progress * 100);
+
+  return (
+    <div className="space-y-3 mt-4" data-testid="optimizer-progress">
+      <div className="flex items-center justify-between text-xs font-mono">
+        <span className="text-muted-foreground">{stage.label}...</span>
+        <span className="text-primary font-bold">{pct}%</span>
+      </div>
+      <div className="w-full h-2 bg-secondary/50 rounded-full overflow-hidden">
+        <div
+          className="h-full bg-primary rounded-full transition-all duration-300 ease-out"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <div className="flex gap-1">
+        {OPTIMIZER_STAGES.map((s, i) => (
+          <div key={s.id} className="flex-1 flex flex-col items-center gap-1">
+            <div className={`w-full h-1 rounded-full ${
+              i < stageIndex ? "bg-green-500" :
+              i === stageIndex ? "bg-primary animate-pulse" :
+              "bg-secondary/30"
+            }`} />
+            <span className={`text-[10px] font-mono leading-tight text-center ${
+              i < stageIndex ? "text-green-500" :
+              i === stageIndex ? "text-primary" :
+              "text-muted-foreground/50"
+            }`}>
+              {s.label.split(" ").slice(0, 2).join(" ")}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 const FEATURE_OPTIONS: { key: keyof FormulaFeatureConfig; label: string; tip: string }[] = [
@@ -169,6 +245,8 @@ export default function FormulaLab() {
                 {isRunning ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Play className="w-4 h-4 mr-2" />}
                 {isRunning ? "OPTIMIZING..." : "RUN OPTIMIZER + REPLAY"}
               </Button>
+
+              <OptimizerProgress iterations={searchIterations[0]} isRunning={isRunning} />
 
               {!hasData && (
                 <p className="text-xs text-muted-foreground font-mono text-center">Need 50+ modern draws to run Formula Lab.</p>
