@@ -52,15 +52,6 @@ function StabilityBadge({ stabilityClass }: { stabilityClass: string }) {
   return <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-mono font-bold ${c.className}`}>{c.label}</span>;
 }
 
-function ConfidenceBadge({ confidence }: { confidence: string }) {
-  const config: Record<string, { className: string }> = {
-    high: { className: "bg-green-500/20 text-green-500 border-green-500/30" },
-    medium: { className: "bg-yellow-500/20 text-yellow-500 border-yellow-500/30" },
-    low: { className: "bg-orange-500/20 text-orange-500 border-orange-500/30" },
-  };
-  const c = config[confidence] || config.low;
-  return <span className={`inline-block px-2 py-0.5 rounded border text-xs font-mono font-bold uppercase ${c.className}`}>{confidence}</span>;
-}
 
 export default function PickGenerator() {
   const { toast } = useToast();
@@ -154,15 +145,31 @@ export default function PickGenerator() {
               <div className="flex-1 space-y-3">
                 <div className="flex items-center gap-3">
                   <span className="text-xl font-bold font-mono" data-testid="text-recommended-strategy">{recommendation.recommendedStrategy}</span>
-                  <ConfidenceBadge confidence={recommendation.confidence} />
-                  {isRecommended && <span className="text-xs text-green-500 font-mono font-bold">ACTIVE</span>}
+                  {isRecommended && (
+                    <span className="inline-block px-2 py-0.5 rounded border text-xs font-mono font-bold bg-green-500/20 text-green-500 border-green-500/30">SELECTED</span>
+                  )}
                 </div>
+
+                <div className="flex flex-wrap items-center gap-2 text-xs font-mono">
+                  <Tip label={`Confidence: ${recommendation.confidence.toUpperCase()}`}
+                    tip="How strongly the benchmark evidence supports this recommendation. HIGH = consistent results across multiple windows."
+                    className={`px-2 py-0.5 rounded border ${
+                      recommendation.confidence === "high" ? "border-green-500/30 text-green-500" :
+                      recommendation.confidence === "medium" ? "border-yellow-500/30 text-yellow-500" :
+                      "border-orange-500/30 text-orange-500"
+                    }`} />
+                  {recommendation.evidence && (
+                    <Tip label={`Delta: ${recommendation.evidence.bestAvgDelta >= 0 ? "+" : ""}${recommendation.evidence.bestAvgDelta}`}
+                      tip="Average number of extra main-ball matches per draw compared to random across all tested windows."
+                      className={`font-bold ${recommendation.evidence.bestAvgDelta > 0 ? "text-green-500" : "text-muted-foreground"}`} />
+                  )}
+                </div>
+
                 <p className="text-sm text-muted-foreground leading-relaxed">{recommendation.reasonSummary}</p>
 
                 {recommendation.evidence && (
                   <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs font-mono text-muted-foreground pt-2 border-t border-border/30">
                     <Tip label={`Best: ${recommendation.evidence.bestStrategy}`} tip="The strategy with the highest average delta vs random across all tested windows." />
-                    <Tip label={`Avg delta: ${recommendation.evidence.bestAvgDelta >= 0 ? "+" : ""}${recommendation.evidence.bestAvgDelta}`} tip="Average number of extra main-ball matches per draw compared to random. Positive = better than random." className={recommendation.evidence.bestAvgDelta > 0 ? "text-green-500" : ""} />
                     <Tip label={`Windows: ${recommendation.evidence.windowsTested.join(", ")}`} tip="The test window sizes used in the benchmark (number of draws per test window)." />
                     <Tip label={`Strategies: ${recommendation.evidence.strategiesTested}`} tip="Total number of predictive strategies tested in the benchmark." />
                   </div>
