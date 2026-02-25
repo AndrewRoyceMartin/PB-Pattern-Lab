@@ -48,11 +48,19 @@ export async function generatePicks(mode: GeneratorMode, drawFitWeight: number, 
   return json.data;
 }
 
-export async function runBenchmark(windowSizes: number[] = [20, 40, 60, 100], minTrainDraws: number = 100) {
+export async function runBenchmark(
+  windowSizes: number[] = [20, 40, 60, 100],
+  minTrainDraws: number = 100,
+  benchmarkMode: "fixed_holdout" | "rolling_walk_forward" = "fixed_holdout",
+  seed: number = 42,
+  randomBaselineRuns: number = 200,
+  runPermutation: boolean = false,
+  permutationRuns: number = 200
+) {
   const res = await fetch("/api/validation/benchmark", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ windowSizes, minTrainDraws }),
+    body: JSON.stringify({ windowSizes, minTrainDraws, benchmarkMode, seed, randomBaselineRuns, runPermutation, permutationRuns }),
   });
   const json = await res.json();
   if (!res.ok || !json.ok) {

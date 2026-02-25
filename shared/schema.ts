@@ -114,6 +114,17 @@ export interface ValidationSummary {
 
 export type StabilityClass = "possible_edge" | "weak_edge" | "no_edge" | "underperforming" | "insufficient_data";
 
+export type BenchmarkMode = "fixed_holdout" | "rolling_walk_forward";
+
+export interface RandomEnsembleSummary {
+  runs: number;
+  seed: number;
+  mean: number;
+  p05: number;
+  p95: number;
+  stdDev: number;
+}
+
 export interface BenchmarkStrategyWindow {
   strategy: string;
   windowSize: number;
@@ -124,7 +135,9 @@ export interface BenchmarkStrategyWindow {
   powerballHitRate: number;
   powerballHits: number;
   deltaVsRandom: number;
+  deltaVsRandomMean: number;
   beatsRandom: boolean;
+  withinRandomBand: boolean;
 }
 
 export interface BenchmarkStrategyStability {
@@ -136,15 +149,30 @@ export interface BenchmarkStrategyStability {
   stabilityClass: StabilityClass;
 }
 
+export interface BenchmarkPermutationResult {
+  strategy: string;
+  metric: string;
+  observedDelta: number;
+  nullMean: number;
+  nullStd: number;
+  percentile: number;
+  empiricalPValue: number;
+  cautionText: string;
+}
+
 export interface BenchmarkSummary {
   byWindowByStrategy: BenchmarkStrategyWindow[];
   stabilityByStrategy: BenchmarkStrategyStability[];
   windowSizesTested: number[];
   totalDrawsAvailable: number;
   overallVerdict: string;
+  benchmarkMode: BenchmarkMode;
+  seed: number;
+  randomEnsemble: RandomEnsembleSummary | null;
+  permutationTests: BenchmarkPermutationResult[];
 }
 
-export type GeneratorMode = "balanced" | "anti_popular" | "pattern_only" | "random_baseline" | "most_drawn_all_time" | "most_drawn_last_50" | "most_drawn_last_100" | "most_drawn_last_20" | "least_drawn_last_50" | "structure_matched_random" | "anti_popular_only" | "diversity_optimized";
+export type GeneratorMode = "balanced" | "anti_popular" | "pattern_only" | "random_baseline" | "most_drawn_all_time" | "most_drawn_last_50" | "most_drawn_last_100" | "most_drawn_last_20" | "least_drawn_last_50" | "structure_matched_random" | "anti_popular_only" | "diversity_optimized" | "strategy_portfolio" | "most_drawn_smoothed_last_50" | "most_drawn_smoothed_last_20" | "recency_smoothed";
 
 export interface GeneratorConfig {
   mode: GeneratorMode;
@@ -169,6 +197,7 @@ export interface GeneratedPick {
   antiPop: number;
   finalScore: number;
   antiPopBreakdown: AntiPopularityBreakdown;
+  sourceStrategy?: string;
 }
 
 export type RecommendationConfidence = "low" | "medium" | "high";

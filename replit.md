@@ -2,78 +2,7 @@
 
 ## Overview
 
-Powerball Pattern Lab is a full-stack web application for Australian Powerball lottery analysis. It allows users to import historical draw results via CSV, discover statistical patterns (frequency, recency, structure, carryover), validate those patterns through walk-forward backtesting, and generate ranked number picks using validated signals combined with anti-popularity scoring.
-
-The app follows a monorepo structure with three main directories:
-- `client/` — React SPA frontend
-- `server/` — Express API backend
-- `shared/` — Shared TypeScript types, database schema, and typed DTOs
-
-## Recent Changes
-
-- **2026-02-24**: Major refactor implementing benchmark-first architecture:
-  - Added typed DTOs in `shared/schema.ts` (NumberFrequency, PatternFeatureRow, AuditSummary, StrategyResult, ValidationSummary, RollingWindow, GeneratorConfig, GeneratedPick with AntiPopularityBreakdown, ApiResponse wrapper)
-  - Refactored `server/analysis.ts` into 3 engines: Pattern Discovery, Validation (walk-forward with verdict classification), Generator (mode-based with anti-popularity breakdown)
-  - Added randomness audit (chi-square + entropy analysis)
-  - Standardized all API responses to `{ok, meta, data}` format
-  - Added `/api/analysis/audit` endpoint
-  - Generator supports 7 modes: balanced, anti_popular, pattern_only, random_baseline, most_drawn_all_time, most_drawn_last_50, most_drawn_last_100
-  - Rebuilt all 5 frontend pages with improved UX
-- **2026-02-24**: Added multi-window benchmark validation engine:
-  - New `POST /api/validation/benchmark` endpoint with configurable window sizes and min training draws
-  - Tests all 8 strategies across multiple windows (20/40/60/100 draws) under identical scoring rules
-  - Stability classification per strategy: possible_edge, weak_edge, no_edge, underperforming
-  - Overall verdict with plain-English summary
-  - Validation page rebuilt with: single-window table, benchmark runner with window selection, stability summary, full Window x Strategy results, CSV export
-  - New shared types: BenchmarkSummary, BenchmarkStrategyWindow, BenchmarkStrategyStability, StabilityClass
-- **2026-02-24**: Added Most Drawn frequency benchmark strategies:
-  - 3 new strategies (All-Time, Last 50, Last 100) in walk-forward validation
-  - Validation table shows "beats random" flag and delta per strategy
-  - Plain-English Most Drawn summary card on Validation page
-  - Generator supports Most Drawn modes with diverse card generation from frequency-ranked pools
-  - Deterministic tie-breaking (count > recency > number) for reproducible results
-- **2026-02-24**: Added evidence-based generator recommendation engine:
-  - Server-side recommendation logic derived from latest benchmark validation results
-  - Rules: possible_edge → use that strategy directly; weak_edge → balanced mode; no_edge → anti-popularity mode
-  - `GET /api/generator/recommendation` endpoint returns recommended mode, confidence, reason, evidence, and strategy badges
-  - Benchmark results stored in memory and used for recommendations
-  - Generator page shows "Recommended Technique" card with confidence badge, reason, evidence metrics, and "Apply" button
-  - Strategy selector annotated with stability badges (possible edge, weak edge, no edge, underperforming) and "REC" label
-  - Manual override always available; recommendation is not a guarantee of winning numbers
-  - New shared types: GeneratorRecommendation, RecommendationEvidence, RecommendationConfidence
-- **2026-02-24**: Strategy Expansion Sprint — 5 new strategies:
-  - Most Drawn (Last 20): short-window frequency strategy using only last 20 training draws
-  - Least Drawn (Last 50): contrarian baseline picking coldest numbers from last 50 draws
-  - Structure-Matched Random: random picks constrained by historical draw structure (odd/even, sum, low/high, spread)
-  - Anti-Popular Only: pure anti-popularity scoring with no pattern signals — maximum split-risk reduction
-  - Diversity Optimized: optimizes number coverage across top 10 cards with overlap penalties
-  - All 5 strategies added to: strategy registry (benchmark), single-window validation, generator modes, recommendation engine, UI selectors, and strategy tooltips
-  - Recommendation engine updated: no-edge recommends Anti-Popular Only; structure-matched advantage recommends Structure-Matched Random
-  - Generator mode count: 12 (up from 7); validation strategy count: 13 (up from 8)
-- **2026-02-24**: Pattern Lab analysis page upgrades:
-  - Randomness Audit split into separate Main Numbers (1-35) and Powerball (1-20) audit cards with independent chi-square/entropy tests
-  - Audit verdicts use PASS/FLAGGED/FAIL labels with interpretation notes explaining that non-randomness does not imply predictive edge
-  - Audit cards show scope, draws used, and "Open Validation" action button when verdict is not PASS
-  - Extracted Features table expanded with %ile (percentile rank), Typicality badge (Typical/Uncommon/Rare), and Normal Range (10th-90th percentile) columns
-  - Historical Structure Profile panel showing most common odd/even split, low/high split, sum/range medians with quantile bands, avg carryover, avg consecutive pairs
-  - Number Frequencies table upgraded with 9 sort presets: # Order, Top All-Time, Hot L10/L25/L50, Cold L50, Most Overdue, Trend Up/Down
-  - Rank column appears when a sort preset is active
-  - Trend column has tooltip explaining formula (L10 frequency minus prior-L10 frequency)
-  - All metrics tooltips added to chi-square, entropy, entropy ratio, structure profile values
-  - New API endpoints: `GET /api/analysis/structure-profile`; audit endpoint now returns `{main, powerball}` object
-  - New shared types: StructureProfile; AuditSummary extended with scope, drawsUsed, interpretation fields; PatternFeatureRow extended with percentile, typicality, normalRange fields
-- **2026-02-24**: Formula Lab / Replay Optimizer module:
-  - New `/formula-lab` page with feature selection, optimizer settings, and results display
-  - Formula scoring engine with weighted features (frequency, recency, trend, structure, carryover, anti-popularity)
-  - Retrospective optimizer using constrained random search with regularization/complexity penalty
-  - Walk-forward replay engine testing optimized formulas across 20/40/60/100-draw windows
-  - Monte Carlo permutation test (100 permutations) for significance checking with empirical p-value
-  - Overfit risk diagnostics: overfit_likely / inconclusive / weak_signal / possible_signal classification
-  - Caveated verdicts with plain-English summaries and persistent caveat banner
-  - All results explicitly label retrospective fit vs walk-forward replay
-  - New API endpoint: `POST /api/formula-lab/optimize`
-  - New server module: `server/formula-lab.ts` (Formula Lab engine)
-  - New shared types: FormulaFeatureConfig, FormulaWeights, FormulaOptimizerConfig, FormulaCandidateResult, FormulaOverfitRisk, FormulaReplayWindow, FormulaReplayResult, FormulaPermutationResult, FormulaLabResult
+Powerball Pattern Lab is a full-stack web application designed for analyzing the Australian Powerball lottery. It enables users to import historical draw data, discover statistical patterns (frequency, recency, structure, carryover), validate these patterns through walk-forward backtesting, and generate ranked number picks. A key feature is its "benchmark-first" approach, where pattern strategies are rigorously validated against random baselines and anti-popularity scoring to ensure practical utility. The application aims to provide insights and tools for lottery enthusiasts.
 
 ## User Preferences
 
@@ -82,77 +11,46 @@ Preferred communication style: Simple, everyday language.
 ## System Architecture
 
 ### Frontend
-- **Framework**: React with TypeScript, using Vite as the build tool
-- **Routing**: Wouter (lightweight client-side router) with 6 main pages:
-  - `/` — Dashboard (system overview, verdict summary, recent draws, strategy benchmarks)
-  - `/ingest` — CSV file upload for importing Powerball draw data
-  - `/patterns` — Pattern Lab (frequency analysis, structure features, randomness audit with chi-square/entropy)
-  - `/validation` — Walk-forward backtest with verdict classification, strategy comparison, rolling windows, diagnostics
-  - `/generator` — Pick generation with 12 modes (Balanced, Low Split-Risk, Anti-Popular Only, Experimental Pattern, Structure-Matched Random, Diversity Optimized, Most Drawn All-Time/Last 100/Last 50/Last 20, Least Drawn Last 50, Random Baseline), anti-popularity breakdown
-  - `/formula-lab` — Formula Lab / Replay Optimizer (weighted formula search, walk-forward replay, permutation test, overfit diagnostics)
-- **UI Components**: shadcn/ui (new-york style) built on Radix UI primitives with Tailwind CSS
-- **State Management**: TanStack React Query for server state; local React state for UI
-- **Styling**: Tailwind CSS v4 with CSS variables for theming; dark mode by default for a "lab" aesthetic
-- **Fonts**: Inter (sans) and JetBrains Mono (monospace) for the data-heavy UI
-- **Path aliases**: `@/` maps to `client/src/`, `@shared/` maps to `shared/`
+- **Framework**: React with TypeScript, Vite
+- **Routing**: Wouter, supporting 6 main pages: Dashboard, CSV Ingest, Pattern Lab, Validation, Pick Generator, and Formula Lab.
+- **UI Components**: shadcn/ui (New York style) built on Radix UI primitives with Tailwind CSS.
+- **State Management**: TanStack React Query for server state, local React state for UI.
+- **Styling**: Tailwind CSS v4, dark mode by default.
+- **Fonts**: Inter (sans) and JetBrains Mono (monospace).
 
 ### Backend
-- **Runtime**: Node.js with Express
-- **Language**: TypeScript, executed via `tsx` in development
-- **API Pattern**: RESTful JSON API under `/api/` prefix, standardized `{ok, meta, data}` response format
-- **Key Endpoints**:
-  - `POST /api/upload` — CSV file upload (multer, memory storage, 10MB limit)
-  - `GET /api/stats` — Draw count and dataset summary
-  - `GET /api/draws` — All modern draws ordered by draw number
-  - `GET /api/analysis/frequencies` — Number frequency analysis (L10, L25, L50 windows)
-  - `GET /api/analysis/features` — Structure and carryover feature extraction
-  - `GET /api/analysis/audit` — Randomness audit (chi-square + entropy)
-  - `GET /api/analysis/validation` — Walk-forward backtest with verdict classification
-  - `GET /api/generator/recommendation` — Evidence-based technique recommendation from latest benchmark
-  - `POST /api/generate` — Generate ranked picks with mode selection and configurable weights
-- **Analysis Engine** (`server/analysis.ts`): Three engines:
-  - Engine A (Pattern Discovery): frequency, structure, carryover, rolling drift
-  - Engine B (Validation): walk-forward backtest with 13 strategies (Random, Frequency, Recency, Structure-Aware, Composite, Most Drawn All-Time/Last 100/Last 50/Last 20, Least Drawn Last 50, Structure-Matched Random, Anti-Popular Only, Diversity Optimized), rolling windows, verdict classification (no_edge/weak_edge/possible_edge/insufficient_data), "beats random" flag per strategy
-  - Engine B2 (Multi-Window Benchmark): tests all 13 strategies across configurable window sizes (20/40/60/100 draws), computes per-window deltas vs random, aggregates into stability classification (possible_edge/weak_edge/no_edge/underperforming), CSV export
-  - Engine C (Generator): ranked picks with draw-fit scoring, anti-popularity penalties (birthday, sequence, endings, aesthetic, low PB), 12 generation modes including frequency benchmarks (Most Drawn, Least Drawn), Structure-Matched Random, Anti-Popular Only, and Diversity Optimized
-- **Dev Server**: Vite middleware is integrated into Express for HMR during development
-- **Production Build**: Vite builds the client; esbuild bundles the server into `dist/index.cjs`
+- **Runtime**: Node.js with Express.
+- **Language**: TypeScript.
+- **API Pattern**: RESTful JSON API under `/api/`, standardized `{ok, meta, data}` response format.
+- **Core Engines**:
+    - **Pattern Discovery**: Extracts frequency, structure, carryover, and rolling drift patterns.
+    - **Validation**: Performs walk-forward backtesting using 16 strategies (including random, frequency, recency, structure-aware, composite, and various "most drawn" and "least drawn" approaches), supporting multi-window benchmarking with stability classification and permutation significance testing.
+    - **Generator**: Produces ranked picks based on draw-fit scoring and anti-popularity penalties, offering 16 generation modes including frequency benchmarks, Bayesian-smoothed strategies, and a Strategy Portfolio.
+    - **Formula Lab**: Allows for weighted feature formula optimization, walk-forward replay, and permutation testing with overfit diagnostics.
 
 ### Database
-- **Database**: PostgreSQL
-- **ORM**: Drizzle ORM with `drizzle-zod` for schema validation
-- **Schema** (in `shared/schema.ts`):
-  - `draws` table: `id` (serial PK), `drawNumber` (int), `drawDate` (text), `numbers` (JSON array of ints), `powerball` (int), `isModernFormat` (boolean), `createdAt` (timestamp)
-  - `users` table: `id` (UUID PK), `username` (unique text), `password` (text) — defined but not actively used yet
-- **Connection**: `pg.Pool` via `DATABASE_URL` environment variable
-- **Migrations**: Drizzle Kit with `db:push` command for schema sync
-- **Storage Layer** (`server/storage.ts`): `DatabaseStorage` class implementing `IStorage` interface with methods for CRUD on draws
-
-### Build System
-- **Development**: `tsx server/index.ts` runs the full-stack app with Vite middleware for hot reloading
-- **Production Build**: `script/build.ts` runs Vite build for client assets, then esbuild for server bundle
-- **Server bundling strategy**: Common dependencies are bundled (allowlisted) to reduce cold start syscalls; uncommon deps are externalized
+- **Database**: PostgreSQL.
+- **ORM**: Drizzle ORM with `drizzle-zod`.
+- **Schema**: `draws` table for historical lottery data, `users` table (planned for future use).
+- **Connection**: `pg.Pool` via `DATABASE_URL`.
+- **Migrations**: Drizzle Kit.
 
 ### Key Design Decisions
-1. **Monorepo with shared types**: The `shared/` directory contains the database schema and TypeScript types used by both client and server, ensuring type safety across the stack.
-2. **Dark-mode-first theme**: The app uses a dark color scheme by default to match the "lab" concept, configured via CSS custom properties.
-3. **CSV-based data import**: Rather than scraping or API integration, users upload CSV files of historical draws. The server parses and normalizes them, filtering for the modern 7+1 format.
-4. **Server-side analysis**: All statistical computation happens on the server to keep the client lightweight. The client simply fetches and displays results.
-5. **Walk-forward validation**: Backtesting uses walk-forward methodology to avoid look-ahead bias when evaluating pattern strategies.
-6. **Benchmark-first design**: Validation is the gatekeeper — what doesn't beat random doesn't influence the generator. The anti-popularity engine provides practical value even when no predictive edge exists.
-7. **Standardized API responses**: All endpoints return `{ok, meta, data}` format for consistent client consumption.
+1.  **Monorepo with shared types**: `shared/` directory ensures type safety across client and server.
+2.  **Dark-mode-first theme**: Aligns with the "lab" aesthetic.
+3.  **CSV-based data import**: Users upload historical draw data, parsed and normalized server-side.
+4.  **Server-side analysis**: All statistical computations are handled by the server to keep the client lightweight.
+5.  **Walk-forward validation**: Essential for avoiding look-ahead bias in backtesting.
+6.  **Benchmark-first design**: Emphasizes rigorous validation; only strategies proven to beat random or provide anti-popularity benefits influence pick generation.
+7.  **Standardized API responses**: Consistent `{ok, meta, data}` format for all API endpoints.
 
 ## External Dependencies
 
 ### Required Services
-- **PostgreSQL Database**: Required. Connected via `DATABASE_URL` environment variable. Used for storing imported draw data.
+-   **PostgreSQL Database**: For storing imported draw data, configured via `DATABASE_URL`.
 
 ### Key NPM Packages
-- **Frontend**: React, Wouter, TanStack React Query, shadcn/ui (Radix UI), Tailwind CSS, Recharts (charting), Embla Carousel
-- **Backend**: Express, Multer (file uploads), Drizzle ORM, pg (PostgreSQL driver), connect-pg-simple (session store)
-- **Shared**: Zod (validation), drizzle-zod (schema-to-zod bridge)
-- **Build**: Vite, esbuild, tsx
-
-### Environment Variables
-- `DATABASE_URL` — PostgreSQL connection string (required)
-- `NODE_ENV` — Set to `production` for production builds
+-   **Frontend**: React, Wouter, TanStack React Query, shadcn/ui, Tailwind CSS, Recharts, Embla Carousel.
+-   **Backend**: Express, Multer, Drizzle ORM, `pg`, `connect-pg-simple`.
+-   **Shared**: Zod, `drizzle-zod`.
+-   **Build**: Vite, esbuild, `tsx`.

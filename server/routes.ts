@@ -18,6 +18,9 @@ import {
   generateDiverseCards,
   generateStructureMatchedCards,
   generateLeastDrawnCards,
+  generateSmoothedCards,
+  generateRecencySmoothedCards,
+  generateStrategyPortfolio,
   storeBenchmarkResult,
   getGeneratorRecommendation,
 } from "./analysis";
@@ -180,12 +183,20 @@ export async function registerRoutes(
 
   app.post("/api/validation/benchmark", async (req, res) => {
     try {
-      const { windowSizes = [20, 40, 60, 100], minTrainDraws = 100 } = req.body || {};
+      const {
+        windowSizes = [20, 40, 60, 100],
+        minTrainDraws = 100,
+        benchmarkMode = "fixed_holdout",
+        seed = 42,
+        randomBaselineRuns = 200,
+        runPermutation = false,
+        permutationRuns = 200,
+      } = req.body || {};
       const draws = await storage.getModernDraws();
       if (draws.length < 50) {
         return res.status(400).json({ ok: false, message: `Only ${draws.length} modern draws available. Need at least 120 (min window + min training) for benchmark.` });
       }
-      const results = runBenchmarkValidation(draws, windowSizes, minTrainDraws);
+      const results = runBenchmarkValidation(draws, windowSizes, minTrainDraws, benchmarkMode, seed, Math.min(randomBaselineRuns, 500), runPermutation, Math.min(permutationRuns, 200));
       storeBenchmarkResult(results);
       res.json(apiResponse(draws, results));
     } catch (error: any) {
@@ -235,6 +246,27 @@ export async function registerRoutes(
 
       if (mode === "diversity_optimized") {
         const picks = generateDiverseCards(draws, count);
+        return res.json(apiResponse(draws, picks));
+      }
+
+      if (mode === "strategy_portfolio") {
+        const allocationMethod = req.body?.allocationMethod || "equal";
+        const picks = generateStrategyPortfolio(draws, count, allocationMethod);
+        return res.json(apiResponse(draws, picks));
+      }
+
+      if (mode === "most_drawn_smoothed_last_50") {
+        const picks = generateSmoothedCards(draws, 50, count);
+        return res.json(apiResponse(draws, picks));
+      }
+
+      if (mode === "most_drawn_smoothed_last_20") {
+        const picks = generateSmoothedCards(draws, 20, count);
+        return res.json(apiResponse(draws, picks));
+      }
+
+      if (mode === "recency_smoothed") {
+        const picks = generateRecencySmoothedCards(draws, count);
         return res.json(apiResponse(draws, picks));
       }
 

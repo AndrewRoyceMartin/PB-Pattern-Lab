@@ -1,30 +1,32 @@
 import { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { AlertCircle, Target, GitCompare, LayoutDashboard, TrendingUp, BarChart3, Info, Play, Loader2, Download, Shield } from "lucide-react";
+import { AlertCircle, Target, GitCompare, LayoutDashboard, TrendingUp, BarChart3, Info, Play, Loader2, Download, Shield, Beaker, Settings2 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchApi, runBenchmark } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import type { ValidationSummary, BenchmarkSummary } from "@shared/schema";
 
 const STRATEGY_DESCRIPTIONS: Record<string, string> = {
-  "Random": "Pure random number selection — the baseline every strategy must beat to be useful.",
-  "Frequency Only": "Picks the 7 most frequently drawn main numbers from all training data. Tests whether historically common numbers appear more often.",
-  "Recency Only": "Picks numbers that appeared most recently. Tests whether \"hot\" numbers tend to repeat in the short term.",
-  "Structure-Aware Random": "Random picks filtered to match typical draw structure (odd/even balance, sum range). Tests whether structural constraints improve results.",
-  "Structure-Aware": "Random picks filtered to match typical draw structure (odd/even balance, sum range). Tests whether structural constraints improve results.",
-  "Composite Model": "Blends frequency, recency, and trend signals into a weighted score. The main predictive model under test.",
-  "Composite": "Blends frequency, recency, and trend signals into a weighted score. The main predictive model under test.",
-  "Most Drawn (All-Time)": "Picks the 7 most frequently drawn numbers across the entire dataset. A simple frequency benchmark — does historical popularity predict future draws?",
-  "Most Drawn (Last 50)": "Picks the 7 most frequent numbers from the last 50 draws only. Tests whether recent frequency trends outperform long-term averages.",
-  "Most Drawn (Last 100)": "Picks the 7 most frequent numbers from the last 100 draws. A mid-range frequency window between all-time and short-term.",
-  "Most Drawn (Last 20)": "Short-window hot numbers — picks the 7 most frequent numbers from only the last 20 draws. Tests whether very recent trends carry predictive weight.",
-  "Least Drawn (Last 50)": "Contrarian strategy — picks the 7 least frequently drawn numbers from the last 50 draws. Tests whether \"cold\" numbers are overdue for a return.",
-  "Structure-Matched Random": "Random picks constrained to match historical draw structure (odd/even count, sum range, low/high split, spread). A better baseline than plain random because it controls for draw shape.",
-  "Anti-Popular Only": "Pure anti-popularity scoring with no pattern signals. Picks numbers that minimize birthday bias, sequences, repeated endings, and aesthetic patterns. Your strongest practical mode for reducing split-risk.",
-  "Diversity Optimized": "Optimizes number coverage across the top 10 cards. Penalizes repeated Powerballs and excessive main-number overlap between cards. Ideal for multi-ticket buyers wanting maximum coverage.",
+  "Random": "Random ensemble baseline — averaged across multiple seeded runs for stability.",
+  "Frequency Only": "Picks the 7 most frequently drawn main numbers from all training data.",
+  "Recency Only": "Picks numbers that appeared most recently.",
+  "Structure-Aware Random": "Random picks filtered to match typical draw structure.",
+  "Structure-Aware": "Random picks filtered to match typical draw structure.",
+  "Composite Model": "Blends frequency, recency, and trend signals into a weighted score.",
+  "Composite": "Blends frequency, recency, and trend signals into a weighted score.",
+  "Most Drawn (All-Time)": "Picks the 7 most frequently drawn numbers across the entire dataset.",
+  "Most Drawn (Last 50)": "Picks the 7 most frequent numbers from the last 50 draws only.",
+  "Most Drawn (Last 100)": "Picks the 7 most frequent numbers from the last 100 draws.",
+  "Most Drawn (Last 20)": "Short-window hot numbers — picks the 7 most frequent numbers from only the last 20 draws.",
+  "Least Drawn (Last 50)": "Contrarian strategy — picks the 7 least frequently drawn numbers from the last 50 draws.",
+  "Structure-Matched Random": "Random picks constrained to match historical draw structure.",
+  "Anti-Popular Only": "Pure anti-popularity scoring with no pattern signals.",
+  "Diversity Optimized": "Optimizes number coverage across the top 10 cards.",
+  "Smoothed Most Drawn (L50)": "Bayesian-smoothed frequency from last 50 draws — reduces noise by shrinking toward uniform baseline.",
+  "Smoothed Most Drawn (L20)": "Bayesian-smoothed frequency from last 20 draws — short-term signal with noise reduction.",
+  "Recency Smoothed": "Bayesian-smoothed recency scoring — reduces overreaction to recent draws.",
 };
 
 function StrategyName({ name, className }: { name: string; className?: string }) {
@@ -50,15 +52,20 @@ export default function Validation() {
   const [benchmark, setBenchmark] = useState<BenchmarkSummary | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [selectedWindows, setSelectedWindows] = useState([20, 40, 60, 100]);
+  const [benchmarkMode, setBenchmarkMode] = useState<"fixed_holdout" | "rolling_walk_forward">("fixed_holdout");
+  const [seed, setSeed] = useState(42);
+  const [randomRuns, setRandomRuns] = useState(200);
+  const [runPermutation, setRunPermutation] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const hasData = validation && validation.verdict !== "insufficient_data";
 
   const handleRunBenchmark = async () => {
     setIsRunning(true);
     try {
-      const result = await runBenchmark(selectedWindows, 100);
+      const result = await runBenchmark(selectedWindows, 100, benchmarkMode, seed, randomRuns, runPermutation, 100);
       setBenchmark(result);
-      toast({ title: "Benchmark complete", description: `Tested ${result.windowSizesTested.length} windows across ${result.stabilityByStrategy.length} strategies.` });
+      toast({ title: "Benchmark complete", description: `Tested ${result.windowSizesTested.length} windows across ${result.stabilityByStrategy.length} strategies [${benchmarkMode === "rolling_walk_forward" ? "rolling" : "fixed"}].` });
     } catch (error: any) {
       toast({ title: "Benchmark failed", description: error.message, variant: "destructive" });
     } finally {
@@ -68,15 +75,18 @@ export default function Validation() {
 
   const handleExportCSV = () => {
     if (!benchmark) return;
-    const headers = ["Window", "Strategy", "Test Draws", "Train Draws", "Avg Match", "Best Match", "PB Rate%", "Delta vs Random", "Beats Random"];
+    const headers = ["Window", "Strategy", "Test Draws", "Train Draws", "Avg Match", "Best Match", "PB Rate%", "Delta vs Random", "Delta vs Mean", "Beats Random", "Within Band"];
     const rows = benchmark.byWindowByStrategy.map(r =>
-      [r.windowSize, r.strategy, r.testDraws, r.trainDraws, r.avgMainMatches, r.bestMainMatches, r.powerballHitRate, r.deltaVsRandom, r.beatsRandom ? "YES" : "NO"].join(",")
+      [r.windowSize, r.strategy, r.testDraws, r.trainDraws, r.avgMainMatches, r.bestMainMatches, r.powerballHitRate, r.deltaVsRandom, r.deltaVsRandomMean, r.beatsRandom ? "YES" : "NO", r.withinRandomBand ? "YES" : "NO"].join(",")
     );
     const stabilityHeaders = ["Strategy", "Windows Tested", "Windows Beating", "Windows Losing", "Avg Delta", "Stability Class"];
     const stabilityRows = benchmark.stabilityByStrategy.map(s =>
       [s.strategy, s.windowsTested, s.windowsBeating, s.windowsLosing, s.avgDelta, s.stabilityClass].join(",")
     );
     const csv = [
+      `Benchmark Mode: ${benchmark.benchmarkMode}, Seed: ${benchmark.seed}`,
+      benchmark.randomEnsemble ? `Random Ensemble: ${benchmark.randomEnsemble.runs} runs, mean=${benchmark.randomEnsemble.mean}, p05=${benchmark.randomEnsemble.p05}, p95=${benchmark.randomEnsemble.p95}` : "",
+      "",
       "=== Window x Strategy Results ===",
       headers.join(","),
       ...rows,
@@ -92,7 +102,7 @@ export default function Validation() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `benchmark_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `benchmark_${benchmarkMode}_${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -179,10 +189,11 @@ export default function Validation() {
                         const isRandom = result.strategy === "Random";
                         const delta = result.avgMainMatches - randomAvg;
                         const beats = !isRandom && delta > 0;
+                        const isSmoothed = result.strategy.includes("Smoothed");
                         const isMostDrawn = result.strategy.startsWith("Most Drawn");
                         return (
-                          <tr key={i} className={`hover:bg-secondary/20 transition-colors ${isMostDrawn ? "bg-blue-500/5" : ""}`}>
-                            <td className={`p-3 font-bold ${isMostDrawn ? "text-blue-400" : isRandom ? "text-muted-foreground" : ""}`}><StrategyName name={result.strategy} /></td>
+                          <tr key={i} className={`hover:bg-secondary/20 transition-colors ${isMostDrawn ? "bg-blue-500/5" : ""} ${isSmoothed ? "bg-purple-500/5" : ""}`}>
+                            <td className={`p-3 font-bold ${isSmoothed ? "text-purple-400" : isMostDrawn ? "text-blue-400" : isRandom ? "text-muted-foreground" : ""}`}><StrategyName name={result.strategy} /></td>
                             <td className="p-3 text-right font-bold">{result.avgMainMatches}</td>
                             <td className="p-3 text-right">{result.bestMainMatches}/7</td>
                             <td className="p-3 text-right">{result.powerballHitRate}%</td>
@@ -315,12 +326,12 @@ export default function Validation() {
             </CardHeader>
             <CardContent className="space-y-3 text-sm text-muted-foreground">
               <p>
-                Most Drawn strategies are descriptive benchmarks based on historical frequency. They do not imply future draws are dependent on past draws — lottery outcomes are independent events.
+                Most Drawn strategies are descriptive benchmarks based on historical frequency. They do not imply future draws are dependent on past draws.
               </p>
               <p className="font-mono">
                 {anyBeat
-                  ? `${bestMD.strategy} averaged ${bestMD.avgMainMatches} main matches vs ${randomAvg} for random (delta ${bestDelta >= 0 ? "+" : ""}${bestDelta.toFixed(2)}). While this shows a positive result in this test window, frequency patterns should be monitored across multiple windows for consistency.`
-                  : `No Most Drawn variant beat random in this walk-forward test. This is expected — lottery draws are designed to be random. The anti-popularity engine remains the most practical edge.`
+                  ? `${bestMD.strategy} averaged ${bestMD.avgMainMatches} main matches vs ${randomAvg} for random (delta ${bestDelta >= 0 ? "+" : ""}${bestDelta.toFixed(2)}).`
+                  : `No Most Drawn variant beat random in this walk-forward test. This is expected.`
                 }
               </p>
             </CardContent>
@@ -353,7 +364,7 @@ export default function Validation() {
           </div>
         </div>
 
-        <div className="flex gap-2 mb-6">
+        <div className="flex flex-wrap gap-2 mb-4">
           {[20, 40, 60, 100].map(w => (
             <button
               key={w}
@@ -370,6 +381,83 @@ export default function Validation() {
           ))}
         </div>
 
+        <div className="flex flex-wrap gap-2 mb-4">
+          <button
+            onClick={() => setBenchmarkMode("fixed_holdout")}
+            className={`px-3 py-1.5 rounded-md text-xs font-mono border transition-colors ${
+              benchmarkMode === "fixed_holdout"
+                ? "border-primary bg-primary/10 text-primary"
+                : "border-border/50 text-muted-foreground hover:bg-secondary/30"
+            }`}
+            data-testid="button-mode-fixed"
+          >
+            Fixed Holdout
+          </button>
+          <button
+            onClick={() => setBenchmarkMode("rolling_walk_forward")}
+            className={`px-3 py-1.5 rounded-md text-xs font-mono border transition-colors ${
+              benchmarkMode === "rolling_walk_forward"
+                ? "border-green-500 bg-green-500/10 text-green-500"
+                : "border-border/50 text-muted-foreground hover:bg-secondary/30"
+            }`}
+            data-testid="button-mode-rolling"
+          >
+            Rolling Walk-Forward
+          </button>
+        </div>
+
+        <button
+          onClick={() => setShowAdvanced(!showAdvanced)}
+          className="flex items-center gap-1 text-xs font-mono text-muted-foreground hover:text-foreground transition-colors mb-4"
+          data-testid="button-toggle-advanced"
+        >
+          <Settings2 className="w-3 h-3" /> {showAdvanced ? "Hide" : "Show"} Advanced Settings
+        </button>
+
+        {showAdvanced && (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6 p-4 border border-border/50 rounded-md bg-secondary/10">
+            <div>
+              <label className="text-xs font-mono text-muted-foreground block mb-1">Seed</label>
+              <input
+                type="number"
+                value={seed}
+                onChange={(e) => setSeed(Number(e.target.value) || 42)}
+                className="w-full px-2 py-1.5 text-xs font-mono bg-background border border-border rounded-md"
+                data-testid="input-seed"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-mono text-muted-foreground block mb-1">Random Runs</label>
+              <input
+                type="number"
+                value={randomRuns}
+                onChange={(e) => setRandomRuns(Math.min(500, Math.max(10, Number(e.target.value) || 200)))}
+                className="w-full px-2 py-1.5 text-xs font-mono bg-background border border-border rounded-md"
+                data-testid="input-random-runs"
+              />
+            </div>
+            <div className="flex items-end">
+              <button
+                onClick={() => setRunPermutation(!runPermutation)}
+                className={`w-full px-3 py-1.5 rounded-md text-xs font-mono border transition-colors ${
+                  runPermutation
+                    ? "border-purple-500 bg-purple-500/10 text-purple-500"
+                    : "border-border/50 text-muted-foreground hover:bg-secondary/30"
+                }`}
+                data-testid="button-toggle-permutation"
+              >
+                <Beaker className="w-3 h-3 inline mr-1" />
+                Permutation Test {runPermutation ? "ON" : "OFF"}
+              </button>
+            </div>
+            <div className="flex items-end">
+              <p className="text-[10px] text-muted-foreground font-mono">
+                Same seed + config = reproducible results. Random ensemble stabilizes baselines.
+              </p>
+            </div>
+          </div>
+        )}
+
         {benchmark ? (
           <div className="space-y-6">
             <Card className={`border-border ${
@@ -381,6 +469,43 @@ export default function Validation() {
                 <p className="text-sm text-muted-foreground leading-relaxed">{benchmark.overallVerdict}</p>
               </CardContent>
             </Card>
+
+            {benchmark.randomEnsemble && (
+              <Card className="border-border border-blue-500/20" data-testid="card-random-ensemble">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base flex items-center">
+                    <BarChart3 className="w-4 h-4 mr-2 text-blue-400" />
+                    Random Baseline Ensemble
+                  </CardTitle>
+                  <CardDescription className="text-xs font-mono">
+                    {benchmark.randomEnsemble.runs} runs, seed {benchmark.randomEnsemble.seed} — {benchmark.benchmarkMode === "rolling_walk_forward" ? "ROLLING" : "FIXED"} mode
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center font-mono">
+                    <div>
+                      <div className="text-xs text-muted-foreground mb-1">Mean</div>
+                      <div className="text-lg font-bold">{benchmark.randomEnsemble.mean}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground mb-1">5th %ile</div>
+                      <div className="text-lg font-bold text-red-400">{benchmark.randomEnsemble.p05}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground mb-1">95th %ile</div>
+                      <div className="text-lg font-bold text-green-400">{benchmark.randomEnsemble.p95}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground mb-1">Std Dev</div>
+                      <div className="text-lg font-bold">{benchmark.randomEnsemble.stdDev}</div>
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground font-mono mt-3 text-center">
+                    Strategies must exceed the ensemble mean to claim any advantage over random chance.
+                  </p>
+                </CardContent>
+              </Card>
+            )}
 
             <Card className="border-border">
               <CardHeader>
@@ -395,17 +520,17 @@ export default function Validation() {
                     <thead className="bg-secondary/50">
                       <tr>
                         <th className="p-3 text-muted-foreground font-medium">Strategy</th>
-                        <th className="p-3 text-muted-foreground font-medium text-center">Windows Tested</th>
-                        <th className="p-3 text-muted-foreground font-medium text-center">Beating Random</th>
-                        <th className="p-3 text-muted-foreground font-medium text-center">Losing to Random</th>
+                        <th className="p-3 text-muted-foreground font-medium text-center">Tested</th>
+                        <th className="p-3 text-muted-foreground font-medium text-center">Beating</th>
+                        <th className="p-3 text-muted-foreground font-medium text-center">Losing</th>
                         <th className="p-3 text-muted-foreground font-medium text-right">Avg Delta</th>
                         <th className="p-3 text-muted-foreground font-medium text-right">Stability</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border/50">
                       {benchmark.stabilityByStrategy.map((s, i) => (
-                        <tr key={i} className="hover:bg-secondary/20 transition-colors">
-                          <td className={`p-3 font-bold ${s.strategy.startsWith("Most Drawn") ? "text-blue-400" : ""}`}><StrategyName name={s.strategy} /></td>
+                        <tr key={i} className={`hover:bg-secondary/20 transition-colors ${s.strategy.includes("Smoothed") ? "bg-purple-500/5" : ""}`}>
+                          <td className={`p-3 font-bold ${s.strategy.startsWith("Most Drawn") ? "text-blue-400" : s.strategy.includes("Smoothed") || s.strategy.includes("Recency Smooth") ? "text-purple-400" : ""}`}><StrategyName name={s.strategy} /></td>
                           <td className="p-3 text-center">{s.windowsTested}</td>
                           <td className="p-3 text-center text-green-500 font-bold">{s.windowsBeating}</td>
                           <td className="p-3 text-center text-red-500 font-bold">{s.windowsLosing}</td>
@@ -429,6 +554,56 @@ export default function Validation() {
                 </div>
               </CardContent>
             </Card>
+
+            {benchmark.permutationTests && benchmark.permutationTests.length > 0 && (
+              <Card className="border-border border-purple-500/20" data-testid="card-permutation-tests">
+                <CardHeader>
+                  <CardTitle className="flex items-center text-lg">
+                    <Beaker className="w-5 h-5 mr-2 text-purple-400" /> Permutation Significance Tests
+                  </CardTitle>
+                  <CardDescription className="text-xs font-mono">Experimental significance checks — not proof of predictive edge</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {benchmark.permutationTests.map((pt, i) => (
+                    <div key={i} className="p-3 rounded-md border border-border/50 bg-secondary/10">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-mono font-bold">{pt.strategy}</span>
+                        <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded ${
+                          pt.empiricalPValue < 0.05 ? "bg-green-500/20 text-green-500" :
+                          pt.empiricalPValue < 0.2 ? "bg-yellow-500/20 text-yellow-500" :
+                          "bg-muted text-muted-foreground"
+                        }`}>
+                          p={pt.empiricalPValue}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-4 gap-3 text-xs font-mono text-center mb-2">
+                        <div>
+                          <span className="text-muted-foreground block">Observed</span>
+                          <span className="font-bold">{pt.observedDelta >= 0 ? "+" : ""}{pt.observedDelta}</span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground block">Null Mean</span>
+                          <span className="font-bold">{pt.nullMean >= 0 ? "+" : ""}{pt.nullMean}</span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground block">Null Std</span>
+                          <span className="font-bold">{pt.nullStd}</span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground block">Percentile</span>
+                          <span className="font-bold">{pt.percentile}th</span>
+                        </div>
+                      </div>
+                      <p className="text-xs text-muted-foreground">{pt.cautionText}</p>
+                    </div>
+                  ))}
+                  <div className="flex items-start gap-2 p-3 rounded-md bg-purple-500/5 border border-purple-500/20">
+                    <Info className="w-4 h-4 text-purple-400 mt-0.5 shrink-0" />
+                    <p className="text-xs text-purple-400/90">Permutation testing breaks the feature-outcome relationship and tests whether observed performance could arise by chance. A low p-value is suggestive but not proof of causality.</p>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             <Card className="border-border">
               <CardHeader>
@@ -455,12 +630,13 @@ export default function Validation() {
                               <th className="p-2.5 text-muted-foreground font-medium text-right">PB Rate</th>
                               <th className="p-2.5 text-muted-foreground font-medium text-right">Delta</th>
                               <th className="p-2.5 text-muted-foreground font-medium text-center">Beats?</th>
+                              <th className="p-2.5 text-muted-foreground font-medium text-center">In Band?</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-border/50">
                             {windowRows.map((r, j) => (
-                              <tr key={j} className={`hover:bg-secondary/20 transition-colors ${r.strategy.startsWith("Most Drawn") ? "bg-blue-500/5" : ""}`}>
-                                <td className={`p-2.5 font-bold ${r.strategy === "Random" ? "text-muted-foreground" : r.strategy.startsWith("Most Drawn") ? "text-blue-400" : ""}`}>
+                              <tr key={j} className={`hover:bg-secondary/20 transition-colors ${r.strategy.startsWith("Most Drawn") ? "bg-blue-500/5" : ""} ${r.strategy.includes("Smoothed") || r.strategy.includes("Recency Smooth") ? "bg-purple-500/5" : ""}`}>
+                                <td className={`p-2.5 font-bold ${r.strategy === "Random" ? "text-muted-foreground" : r.strategy.startsWith("Most Drawn") ? "text-blue-400" : r.strategy.includes("Smoothed") || r.strategy.includes("Recency Smooth") ? "text-purple-400" : ""}`}>
                                   <StrategyName name={r.strategy} />
                                 </td>
                                 <td className="p-2.5 text-right font-bold">{r.avgMainMatches}</td>
@@ -471,6 +647,9 @@ export default function Validation() {
                                 </td>
                                 <td className="p-2.5 text-center">
                                   {r.strategy === "Random" ? "--" : r.beatsRandom ? <span className="text-green-500 font-bold">YES</span> : <span className="text-muted-foreground">NO</span>}
+                                </td>
+                                <td className="p-2.5 text-center">
+                                  {r.strategy === "Random" ? "--" : r.withinRandomBand ? <span className="text-yellow-500">IN</span> : <span className="text-green-500 font-bold">OUT</span>}
                                 </td>
                               </tr>
                             ))}

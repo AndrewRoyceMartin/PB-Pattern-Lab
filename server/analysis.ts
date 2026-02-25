@@ -12,7 +12,10 @@ import {
   type BenchmarkSummary,
   type BenchmarkStrategyWindow,
   type BenchmarkStrategyStability,
+  type BenchmarkPermutationResult,
   type StabilityClass,
+  type BenchmarkMode,
+  type RandomEnsembleSummary,
   type GeneratorMode,
   type GeneratorRecommendation,
   type RecommendationEvidence,
@@ -43,6 +46,9 @@ const STRATEGY_TO_MODE: Record<string, GeneratorMode> = {
   "Anti-Popular Only": "anti_popular_only",
   "Diversity Optimized": "diversity_optimized",
   "Random": "random_baseline",
+  "Smoothed Most Drawn (L50)": "most_drawn_smoothed_last_50",
+  "Smoothed Most Drawn (L20)": "most_drawn_smoothed_last_20",
+  "Recency Smoothed": "recency_smoothed",
 };
 
 const MODE_TO_LABEL: Record<GeneratorMode, string> = {
@@ -58,7 +64,94 @@ const MODE_TO_LABEL: Record<GeneratorMode, string> = {
   "least_drawn_last_50": "Least Drawn (Last 50)",
   "structure_matched_random": "Structure-Matched Random",
   "diversity_optimized": "Diversity Optimized",
+  "strategy_portfolio": "Strategy Portfolio",
+  "most_drawn_smoothed_last_50": "Smoothed Most Drawn (L50)",
+  "most_drawn_smoothed_last_20": "Smoothed Most Drawn (L20)",
+  "recency_smoothed": "Recency Smoothed",
 };
+
+function mulberry32(seed: number): () => number {
+  let s = seed | 0;
+  return function() {
+    s = (s + 0x6D2B79F5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function seededRandomCard(rng: () => number): number[] {
+  const pool = Array.from({ length: 35 }, (_, i) => i + 1);
+  const picked: number[] = [];
+  for (let i = 0; i < 7; i++) {
+    const idx = Math.floor(rng() * pool.length);
+    picked.push(pool.splice(idx, 1)[0]);
+  }
+  return picked.sort((a, b) => a - b);
+}
+
+function buildSmoothedPick(draws: Draw[], windowSize: number, alpha: number = 0.3): { picks: number[]; pb: number } {
+  const window = draws.slice(0, Math.min(windowSize, draws.length));
+  if (window.length === 0) return { picks: generateRandomCard(), pb: Math.floor(Math.random() * 20) + 1 };
+
+  const uniform = 1 / 35;
+  const mainScores: { number: number; smoothed: number; lastSeen: number }[] = [];
+
+  for (let n = 1; n <= 35; n++) {
+    let count = 0;
+    let lastSeen = window.length;
+    for (let i = 0; i < window.length; i++) {
+      if ((window[i].numbers as number[]).includes(n)) {
+        count++;
+        if (i < lastSeen) lastSeen = i;
+      }
+    }
+    const observed = count / window.length;
+    const smoothed = alpha * uniform + (1 - alpha) * observed;
+    mainScores.push({ number: n, smoothed, lastSeen });
+  }
+
+  mainScores.sort((a, b) => b.smoothed - a.smoothed || a.lastSeen - b.lastSeen || a.number - b.number);
+  const picks = mainScores.slice(0, 7).map(m => m.number).sort((a, b) => a - b);
+
+  const pbUniform = 1 / 20;
+  const pbScores: { number: number; smoothed: number; lastSeen: number }[] = [];
+  for (let n = 1; n <= 20; n++) {
+    let count = 0;
+    let lastSeen = window.length;
+    for (let i = 0; i < window.length; i++) {
+      if (window[i].powerball === n) { count++; if (i < lastSeen) lastSeen = i; }
+    }
+    const observed = count / window.length;
+    const smoothed = alpha * pbUniform + (1 - alpha) * observed;
+    pbScores.push({ number: n, smoothed, lastSeen });
+  }
+  pbScores.sort((a, b) => b.smoothed - a.smoothed || a.lastSeen - b.lastSeen || a.number - b.number);
+
+  return { picks, pb: pbScores[0]?.number ?? 1 };
+}
+
+function buildRecencySmoothedPick(draws: Draw[], alpha: number = 0.3): { picks: number[]; pb: number } {
+  if (draws.length === 0) return { picks: generateRandomCard(), pb: Math.floor(Math.random() * 20) + 1 };
+
+  const uniform = 1 / 35;
+  const mainScores: { number: number; score: number }[] = [];
+
+  for (let n = 1; n <= 35; n++) {
+    let drawsSinceSeen = draws.length;
+    for (let i = 0; i < draws.length; i++) {
+      if ((draws[i].numbers as number[]).includes(n)) { drawsSinceSeen = i; break; }
+    }
+    const recencyScore = 1 - (drawsSinceSeen / draws.length);
+    const smoothed = alpha * uniform + (1 - alpha) * recencyScore;
+    mainScores.push({ number: n, score: smoothed });
+  }
+
+  mainScores.sort((a, b) => b.score - a.score || a.number - b.number);
+  const picks = mainScores.slice(0, 7).map(m => m.number).sort((a, b) => a - b);
+
+  return { picks, pb: draws[0]?.powerball || 1 };
+}
 
 export function getGeneratorRecommendation(): GeneratorRecommendation {
   if (!latestBenchmarkResult || latestBenchmarkResult.stabilityByStrategy.length === 0) {
@@ -140,10 +233,10 @@ export function getGeneratorRecommendation(): GeneratorRecommendation {
   }
 
   return {
-    recommendedMode: "anti_popular_only",
-    recommendedStrategy: "Anti-Popular Only",
+    recommendedMode: "strategy_portfolio",
+    recommendedStrategy: "Strategy Portfolio",
     confidence: "medium",
-    reasonSummary: "No predictive strategy beat random consistently in walk-forward validation. This is expected — lottery draws are designed to be random. Recommending Anti-Popular Only mode to focus entirely on reducing split-risk, which is where the real practical value lies.",
+    reasonSummary: "No single strategy beat random consistently. Recommending Strategy Portfolio mode — it builds a mixed 10-game pack from multiple strategies for maximum coverage and diversity. This combines the practical anti-popularity advantage with diverse strategic approaches.",
     evidence,
     strategyBadges: badges,
     hasBenchmark: true,
@@ -848,10 +941,31 @@ function getStrategyRegistry(): { name: string; fn: StrategyFn }[] {
         return { picks: weightedSample(scored, 7), pb: Math.floor(Math.random() * 20) + 1 };
       },
     },
+    {
+      name: "Smoothed Most Drawn (L50)",
+      fn: (train) => buildSmoothedPick(train, 50),
+    },
+    {
+      name: "Smoothed Most Drawn (L20)",
+      fn: (train) => buildSmoothedPick(train, 20),
+    },
+    {
+      name: "Recency Smoothed",
+      fn: (train) => buildRecencySmoothedPick(train),
+    },
   ];
 }
 
-export function runBenchmarkValidation(draws: Draw[], windowSizes: number[] = [20, 40, 60, 100], minTrainDraws: number = 100): BenchmarkSummary {
+export function runBenchmarkValidation(
+  draws: Draw[],
+  windowSizes: number[] = [20, 40, 60, 100],
+  minTrainDraws: number = 100,
+  benchmarkMode: BenchmarkMode = "fixed_holdout",
+  seed: number = 42,
+  randomBaselineRuns: number = 200,
+  runPermutation: boolean = false,
+  permutationRuns: number = 200
+): BenchmarkSummary {
   const strategies = getStrategyRegistry();
   const validWindows = windowSizes.filter(w => draws.length >= w + minTrainDraws);
 
@@ -862,45 +976,80 @@ export function runBenchmarkValidation(draws: Draw[], windowSizes: number[] = [2
       windowSizesTested: [],
       totalDrawsAvailable: draws.length,
       overallVerdict: `Insufficient data: ${draws.length} draws available, need at least ${Math.min(...windowSizes) + minTrainDraws} for the smallest window.`,
+      benchmarkMode,
+      seed,
+      randomEnsemble: null,
+      permutationTests: [],
     };
   }
 
   const allResults: BenchmarkStrategyWindow[] = [];
+  const ensembleRng = mulberry32(seed);
+  let globalEnsembleDeltas: number[] = [];
 
   for (const windowSize of validWindows) {
     const testDraws = draws.slice(0, windowSize);
     const trainDraws = draws.slice(windowSize);
 
+    const ensembleAvgs: number[] = [];
+    for (let run = 0; run < randomBaselineRuns; run++) {
+      let total = 0;
+      for (const testDraw of testDraws) {
+        const actual = testDraw.numbers as number[];
+        const card = seededRandomCard(ensembleRng);
+        total += card.filter(n => actual.includes(n)).length;
+      }
+      ensembleAvgs.push(total / testDraws.length);
+    }
+
+    const ensembleMean = ensembleAvgs.reduce((s, v) => s + v, 0) / ensembleAvgs.length;
+    const sortedEnsemble = [...ensembleAvgs].sort((a, b) => a - b);
+    const p05 = sortedEnsemble[Math.floor(ensembleAvgs.length * 0.05)];
+    const p95 = sortedEnsemble[Math.floor(ensembleAvgs.length * 0.95)];
+
     const windowResults: { strategy: string; avgMain: number; bestMain: number; pbHits: number }[] = [];
 
     for (const strat of strategies) {
+      if (strat.name === "Random") {
+        windowResults.push({ strategy: "Random", avgMain: ensembleMean, bestMain: 0, pbHits: 0 });
+        continue;
+      }
+
       let totalMain = 0;
       let bestMain = 0;
       let pbHits = 0;
 
-      for (const testDraw of testDraws) {
-        const actual = testDraw.numbers as number[];
-        const actualPB = testDraw.powerball;
-        const { picks, pb } = strat.fn(trainDraws);
-        const mainMatches = picks.filter(n => actual.includes(n)).length;
-        totalMain += mainMatches;
-        bestMain = Math.max(bestMain, mainMatches);
-        if (pb === actualPB) pbHits++;
+      if (benchmarkMode === "rolling_walk_forward") {
+        for (let i = testDraws.length - 1; i >= 0; i--) {
+          const rollingTrain = draws.slice(i + 1);
+          if (rollingTrain.length < minTrainDraws) continue;
+          const testDraw = draws[i];
+          const actual = testDraw.numbers as number[];
+          const actualPB = testDraw.powerball;
+          const { picks, pb } = strat.fn(rollingTrain);
+          const mainMatches = picks.filter(n => actual.includes(n)).length;
+          totalMain += mainMatches;
+          bestMain = Math.max(bestMain, mainMatches);
+          if (pb === actualPB) pbHits++;
+        }
+      } else {
+        for (const testDraw of testDraws) {
+          const actual = testDraw.numbers as number[];
+          const actualPB = testDraw.powerball;
+          const { picks, pb } = strat.fn(trainDraws);
+          const mainMatches = picks.filter(n => actual.includes(n)).length;
+          totalMain += mainMatches;
+          bestMain = Math.max(bestMain, mainMatches);
+          if (pb === actualPB) pbHits++;
+        }
       }
 
-      windowResults.push({
-        strategy: strat.name,
-        avgMain: totalMain / testDraws.length,
-        bestMain,
-        pbHits,
-      });
+      windowResults.push({ strategy: strat.name, avgMain: totalMain / testDraws.length, bestMain, pbHits });
     }
 
-    const randomResult = windowResults.find(r => r.strategy === "Random");
-    const randomAvg = randomResult?.avgMain ?? 0;
-
     for (const r of windowResults) {
-      const delta = r.strategy === "Random" ? 0 : Number((r.avgMain - randomAvg).toFixed(3));
+      const delta = r.strategy === "Random" ? 0 : Number((r.avgMain - ensembleMean).toFixed(3));
+      const withinBand = r.avgMain >= p05 && r.avgMain <= p95;
       allResults.push({
         strategy: r.strategy,
         windowSize,
@@ -911,10 +1060,37 @@ export function runBenchmarkValidation(draws: Draw[], windowSizes: number[] = [2
         powerballHitRate: Number(((r.pbHits / windowSize) * 100).toFixed(1)),
         powerballHits: r.pbHits,
         deltaVsRandom: Number(delta.toFixed(2)),
+        deltaVsRandomMean: Number(delta.toFixed(2)),
         beatsRandom: r.strategy !== "Random" && delta > 0,
+        withinRandomBand: withinBand,
       });
+      if (r.strategy !== "Random") globalEnsembleDeltas.push(delta);
     }
   }
+
+  const allEnsembleAvgs: number[] = [];
+  const ensembleRng2 = mulberry32(seed);
+  const firstWindow = validWindows[0];
+  const firstTestDraws = draws.slice(0, firstWindow);
+  for (let run = 0; run < randomBaselineRuns; run++) {
+    let total = 0;
+    for (const td of firstTestDraws) {
+      total += seededRandomCard(ensembleRng2).filter(n => (td.numbers as number[]).includes(n)).length;
+    }
+    allEnsembleAvgs.push(total / firstTestDraws.length);
+  }
+  const eMean = allEnsembleAvgs.reduce((s, v) => s + v, 0) / allEnsembleAvgs.length;
+  const sortedE = [...allEnsembleAvgs].sort((a, b) => a - b);
+  const eStdDev = Math.sqrt(allEnsembleAvgs.reduce((s, v) => s + Math.pow(v - eMean, 2), 0) / allEnsembleAvgs.length);
+
+  const randomEnsemble: RandomEnsembleSummary = {
+    runs: randomBaselineRuns,
+    seed,
+    mean: Number(eMean.toFixed(3)),
+    p05: Number(sortedE[Math.floor(allEnsembleAvgs.length * 0.05)].toFixed(3)),
+    p95: Number(sortedE[Math.floor(allEnsembleAvgs.length * 0.95)].toFixed(3)),
+    stdDev: Number(eStdDev.toFixed(4)),
+  };
 
   const strategyNames = [...new Set(allResults.map(r => r.strategy))].filter(s => s !== "Random");
   const stabilityByStrategy: BenchmarkStrategyStability[] = strategyNames.map(name => {
@@ -940,14 +1116,71 @@ export function runBenchmarkValidation(draws: Draw[], windowSizes: number[] = [2
     return { strategy: name, windowsTested, windowsBeating, windowsLosing, avgDelta, stabilityClass };
   });
 
+  let permutationTests: BenchmarkPermutationResult[] = [];
+  if (runPermutation && validWindows.length > 0) {
+    const topStrategies = [...stabilityByStrategy].sort((a, b) => b.avgDelta - a.avgDelta).slice(0, 3).filter(s => s.avgDelta > 0);
+    const permRng = mulberry32(seed + 7919);
+
+    for (const strat of topStrategies) {
+      const observedDelta = strat.avgDelta;
+      const nullDeltas: number[] = [];
+
+      for (let p = 0; p < Math.min(permutationRuns, 100); p++) {
+        const shuffled = draws.map(d => ({
+          ...d,
+          numbers: [...(d.numbers as number[])].sort(() => permRng() - 0.5),
+        }));
+        const wSize = validWindows[0];
+        const pTest = shuffled.slice(0, wSize);
+        const pTrain = shuffled.slice(wSize);
+        const stratFn = strategies.find(s => s.name === strat.strategy);
+        if (!stratFn) continue;
+
+        let total = 0;
+        for (const td of pTest) {
+          const { picks } = stratFn.fn(pTrain as Draw[]);
+          total += picks.filter(n => (td.numbers as number[]).includes(n)).length;
+        }
+        const permAvg = total / pTest.length;
+
+        let randTotal = 0;
+        for (const td of pTest) {
+          randTotal += seededRandomCard(permRng).filter(n => (td.numbers as number[]).includes(n)).length;
+        }
+        const randAvg = randTotal / pTest.length;
+        nullDeltas.push(permAvg - randAvg);
+      }
+
+      const nullMean = nullDeltas.reduce((s, d) => s + d, 0) / nullDeltas.length;
+      const nullStd = Math.sqrt(nullDeltas.reduce((s, d) => s + Math.pow(d - nullMean, 2), 0) / nullDeltas.length);
+      const betterCount = nullDeltas.filter(d => d >= observedDelta).length;
+      const empiricalPValue = Number((betterCount / nullDeltas.length).toFixed(3));
+      const percentile = Math.round(((nullDeltas.length - betterCount) / nullDeltas.length) * 100);
+
+      permutationTests.push({
+        strategy: strat.strategy,
+        metric: "avg_main_matches_delta_vs_random",
+        observedDelta: Number(observedDelta.toFixed(3)),
+        nullMean: Number(nullMean.toFixed(3)),
+        nullStd: Number(nullStd.toFixed(3)),
+        percentile,
+        empiricalPValue,
+        cautionText: empiricalPValue < 0.05
+          ? `${strat.strategy} performance (delta +${observedDelta.toFixed(2)}) exceeds ${percentile}% of permuted baselines. This is suggestive but not proof of a predictive edge — lottery draws are independent events.`
+          : `${strat.strategy} performance is within the range of permuted baselines (p=${empiricalPValue}). No evidence that this strategy's performance exceeds random chance.`,
+      });
+    }
+  }
+
+  const modeLabel = benchmarkMode === "rolling_walk_forward" ? "rolling walk-forward" : "fixed holdout";
   const edgeStrategies = stabilityByStrategy.filter(s => s.stabilityClass === "possible_edge" || s.stabilityClass === "weak_edge");
   let overallVerdict: string;
   if (edgeStrategies.length === 0) {
-    overallVerdict = `No strategy showed a consistent edge over random across ${validWindows.length} test windows (${validWindows.join(", ")} draws). This is expected — lottery draws are designed to be random. The anti-popularity engine remains your most practical advantage for reducing split-risk.`;
+    overallVerdict = `No strategy showed a consistent edge over the random ensemble (${randomBaselineRuns} runs, seed ${seed}) across ${validWindows.length} test windows in ${modeLabel} mode. This is expected — lottery draws are designed to be random.`;
   } else {
     const names = edgeStrategies.map(s => s.strategy).join(", ");
     const classes = edgeStrategies.map(s => `${s.strategy}: ${s.stabilityClass.replace(/_/g, " ")}`).join("; ");
-    overallVerdict = `Potential signals detected: ${names}. Classification: ${classes}. These results should be monitored over time — a single benchmark run can overfit to historical patterns.`;
+    overallVerdict = `[${modeLabel.toUpperCase()}] Potential signals detected: ${names}. Classification: ${classes}. Tested against random ensemble (${randomBaselineRuns} runs). Monitor over time.`;
   }
 
   return {
@@ -956,6 +1189,10 @@ export function runBenchmarkValidation(draws: Draw[], windowSizes: number[] = [2
     windowSizesTested: validWindows,
     totalDrawsAvailable: draws.length,
     overallVerdict,
+    benchmarkMode,
+    seed,
+    randomEnsemble,
+    permutationTests,
   };
 }
 
@@ -1530,6 +1767,189 @@ export function scoreAntiPopularity(numbers: number[], powerball: number): { sco
       lowPowerballPenalty,
     },
   };
+}
+
+export function generateSmoothedCards(draws: Draw[], windowSize: number, count: number): GeneratedPick[] {
+  const candidates: GeneratedPick[] = [];
+  const seen = new Set<string>();
+  const basePick = buildSmoothedPick(draws, windowSize);
+
+  for (let attempt = 0; attempt < count * 30 && candidates.length < count; attempt++) {
+    let card: number[];
+    let pb: number;
+
+    if (attempt === 0) {
+      card = basePick.picks;
+      pb = basePick.pb;
+    } else {
+      const window = draws.slice(0, Math.min(windowSize, draws.length));
+      const uniform = 1 / 35;
+      const alpha = 0.3;
+      const smoothed: { number: number; score: number }[] = [];
+      for (let n = 1; n <= 35; n++) {
+        const count_ = window.filter(d => (d.numbers as number[]).includes(n)).length;
+        const observed = count_ / Math.max(window.length, 1);
+        smoothed.push({ number: n, score: alpha * uniform + (1 - alpha) * observed });
+      }
+      card = weightedSample(smoothed.map(s => ({ number: s.number, score: s.score * 1000 })), 7);
+      const pbFreqs = getPbFreqs(window);
+      const pbEntries = Object.entries(pbFreqs).sort(([, a], [, b]) => b - a);
+      pb = pbEntries.length > 0 ? Number(pbEntries[Math.floor(Math.random() * Math.min(5, pbEntries.length))][0]) : Math.floor(Math.random() * 20) + 1;
+    }
+
+    const key = card.join(",") + ":" + pb;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const { score: antiPop, breakdown } = scoreAntiPopularity(card, pb);
+    const overlap = card.filter(n => basePick.picks.includes(n)).length;
+    const drawFit = Math.round((overlap / 7) * 100);
+    const finalScore = (drawFit * 60 + antiPop * 40) / 100;
+
+    candidates.push({
+      rank: 0, numbers: card, powerball: pb,
+      drawFit, antiPop: Math.round(antiPop),
+      finalScore: Math.round(finalScore * 10) / 10,
+      antiPopBreakdown: breakdown,
+    });
+  }
+
+  candidates.sort((a, b) => b.finalScore - a.finalScore);
+  return candidates.slice(0, count).map((c, i) => ({ ...c, rank: i + 1 }));
+}
+
+export function generateRecencySmoothedCards(draws: Draw[], count: number): GeneratedPick[] {
+  const candidates: GeneratedPick[] = [];
+  const seen = new Set<string>();
+  const basePick = buildRecencySmoothedPick(draws);
+
+  for (let attempt = 0; attempt < count * 30 && candidates.length < count; attempt++) {
+    let card: number[];
+    let pb: number;
+
+    if (attempt === 0) {
+      card = basePick.picks;
+      pb = basePick.pb;
+    } else {
+      const uniform = 1 / 35;
+      const alpha = 0.3;
+      const scored: { number: number; score: number }[] = [];
+      for (let n = 1; n <= 35; n++) {
+        let dss = draws.length;
+        for (let i = 0; i < draws.length; i++) {
+          if ((draws[i].numbers as number[]).includes(n)) { dss = i; break; }
+        }
+        const rec = 1 - (dss / draws.length);
+        scored.push({ number: n, score: (alpha * uniform + (1 - alpha) * rec) * 1000 });
+      }
+      card = weightedSample(scored, 7);
+      pb = draws[0]?.powerball || Math.floor(Math.random() * 20) + 1;
+    }
+
+    const key = card.join(",") + ":" + pb;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const { score: antiPop, breakdown } = scoreAntiPopularity(card, pb);
+    const overlap = card.filter(n => basePick.picks.includes(n)).length;
+    const drawFit = Math.round((overlap / 7) * 100);
+    const finalScore = (drawFit * 60 + antiPop * 40) / 100;
+
+    candidates.push({
+      rank: 0, numbers: card, powerball: pb,
+      drawFit, antiPop: Math.round(antiPop),
+      finalScore: Math.round(finalScore * 10) / 10,
+      antiPopBreakdown: breakdown,
+    });
+  }
+
+  candidates.sort((a, b) => b.finalScore - a.finalScore);
+  return candidates.slice(0, count).map((c, i) => ({ ...c, rank: i + 1 }));
+}
+
+export function generateStrategyPortfolio(draws: Draw[], count: number = 10, allocationMethod: "equal" | "validation_weighted" = "equal"): GeneratedPick[] {
+  const categories: { label: string; fn: (train: Draw[]) => { picks: number[]; pb: number }; slots: number }[] = [
+    { label: "Most Drawn (All-Time)", fn: (t) => buildMostDrawnPick(t, t.length), slots: 2 },
+    { label: "Smoothed Most Drawn (L50)", fn: (t) => buildSmoothedPick(t, 50), slots: 1 },
+    { label: "Recency Smoothed", fn: (t) => buildRecencySmoothedPick(t), slots: 1 },
+    { label: "Structure-Matched Random", fn: (t) => ({ picks: generateStructureMatchedCard(t), pb: Math.floor(Math.random() * 20) + 1 }), slots: 2 },
+    { label: "Anti-Popular Only", fn: () => generateAntiPopularPick(), slots: 2 },
+    { label: "Composite", fn: (t) => {
+      const freqs = computeNumberFrequencies(t);
+      const scored = freqs.map(f => ({ number: f.number, score: f.last25Freq * 2 + f.last10Freq * 3 - f.drawsSinceSeen * 0.5 + f.rollingTrend * 2 }));
+      const sorted = [...scored].sort((a, b) => b.score - a.score);
+      return { picks: sorted.slice(0, 7).map(f => f.number).sort((a, b) => a - b), pb: topPb(getPbFreqs(t.slice(0, 25))) };
+    }, slots: 1 },
+    { label: "Random Baseline", fn: () => ({ picks: generateRandomCard(), pb: Math.floor(Math.random() * 20) + 1 }), slots: 1 },
+  ];
+
+  if (allocationMethod === "validation_weighted" && latestBenchmarkResult) {
+    const stabilities = latestBenchmarkResult.stabilityByStrategy;
+    for (const cat of categories) {
+      const stability = stabilities.find(s => s.strategy === cat.label);
+      if (stability) {
+        if (stability.stabilityClass === "possible_edge") cat.slots = Math.min(cat.slots + 1, 3);
+        else if (stability.stabilityClass === "underperforming") cat.slots = Math.max(cat.slots - 1, 0);
+      }
+    }
+  }
+
+  const totalSlots = categories.reduce((s, c) => s + c.slots, 0);
+  const scaleFactor = count / totalSlots;
+  let allocated = 0;
+  for (const cat of categories) {
+    cat.slots = Math.max(1, Math.round(cat.slots * scaleFactor));
+    allocated += cat.slots;
+  }
+  while (allocated > count) { categories[categories.length - 1].slots--; allocated--; }
+  while (allocated < count) { categories[0].slots++; allocated++; }
+
+  const allCandidates: GeneratedPick[] = [];
+  const seen = new Set<string>();
+  const usedNumbers = new Map<number, number>();
+
+  for (const cat of categories) {
+    for (let i = 0; i < cat.slots; i++) {
+      let bestPick: GeneratedPick | null = null;
+      let bestDiversityScore = -Infinity;
+
+      for (let attempt = 0; attempt < 20; attempt++) {
+        const { picks, pb } = cat.fn(draws);
+        const key = picks.join(",") + ":" + pb;
+        if (seen.has(key)) continue;
+
+        let overlapPenalty = 0;
+        for (const n of picks) overlapPenalty += (usedNumbers.get(n) || 0) * 3;
+
+        const { score: antiPop, breakdown } = scoreAntiPopularity(picks, pb);
+        const freqs = computeNumberFrequencies(draws);
+        const scored = freqs.map(f => ({ number: f.number, score: f.last25Freq * 2 + f.last10Freq * 3 - f.drawsSinceSeen * 0.5 + f.rollingTrend * 2 }));
+        const drawFit = computeDrawFitScore(picks, scored);
+        const finalScore = (drawFit * 50 + antiPop * 50) / 100;
+        const diversityScore = finalScore - overlapPenalty;
+
+        if (diversityScore > bestDiversityScore) {
+          bestDiversityScore = diversityScore;
+          bestPick = {
+            rank: 0, numbers: picks, powerball: pb,
+            drawFit: Math.round(drawFit), antiPop: Math.round(antiPop),
+            finalScore: Math.round(finalScore * 10) / 10,
+            antiPopBreakdown: breakdown,
+            sourceStrategy: cat.label,
+          };
+        }
+      }
+
+      if (bestPick) {
+        seen.add(bestPick.numbers.join(",") + ":" + bestPick.powerball);
+        for (const n of bestPick.numbers) usedNumbers.set(n, (usedNumbers.get(n) || 0) + 1);
+        allCandidates.push(bestPick);
+      }
+    }
+  }
+
+  allCandidates.sort((a, b) => b.finalScore - a.finalScore);
+  return allCandidates.slice(0, count).map((c, i) => ({ ...c, rank: i + 1 }));
 }
 
 export { generateMostDrawnCards, generateAntiPopularCards, generateDiverseCards, generateStructureMatchedCards, generateLeastDrawnCards };

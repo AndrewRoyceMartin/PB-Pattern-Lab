@@ -23,6 +23,7 @@ function Tip({ label, tip, className }: { label: string; tip: string; className?
 }
 
 const MODES: { value: GeneratorMode; label: string; description: string; drawFit: number; antiPop: number; group?: string; strategyName?: string }[] = [
+  { value: "strategy_portfolio", label: "Strategy Portfolio", description: "Best from Each Test — mixed 10-game pack from multiple strategies for maximum coverage", drawFit: 50, antiPop: 50, strategyName: "Strategy Portfolio" },
   { value: "balanced", label: "Balanced", description: "60% pattern signals, 40% anti-popularity", drawFit: 60, antiPop: 40, strategyName: "Composite" },
   { value: "anti_popular", label: "Low Split-Risk", description: "20% pattern, 80% anti-popularity", drawFit: 20, antiPop: 80 },
   { value: "anti_popular_only", label: "Anti-Popular Only", description: "Pure anti-popularity scoring — maximum split-risk reduction", drawFit: 0, antiPop: 100, strategyName: "Anti-Popular Only" },
@@ -34,6 +35,9 @@ const MODES: { value: GeneratorMode; label: string; description: string; drawFit
   { value: "most_drawn_last_50", label: "Most Drawn (Last 50)", description: "Top frequency from last 50 draws", drawFit: 100, antiPop: 0, group: "frequency", strategyName: "Most Drawn (Last 50)" },
   { value: "most_drawn_last_20", label: "Most Drawn (Last 20)", description: "Top frequency from last 20 draws — short-window hot numbers", drawFit: 100, antiPop: 0, group: "frequency", strategyName: "Most Drawn (Last 20)" },
   { value: "least_drawn_last_50", label: "Least Drawn (Last 50)", description: "Contrarian — picks the coldest numbers from last 50 draws", drawFit: 100, antiPop: 0, group: "frequency", strategyName: "Least Drawn (Last 50)" },
+  { value: "most_drawn_smoothed_last_50", label: "Smoothed Most Drawn (L50)", description: "Bayesian-smoothed frequency — reduces noise by shrinking toward uniform baseline", drawFit: 100, antiPop: 0, group: "smoothed", strategyName: "Smoothed Most Drawn (L50)" },
+  { value: "most_drawn_smoothed_last_20", label: "Smoothed Most Drawn (L20)", description: "Short-window Bayesian-smoothed frequency with noise reduction", drawFit: 100, antiPop: 0, group: "smoothed", strategyName: "Smoothed Most Drawn (L20)" },
+  { value: "recency_smoothed", label: "Recency Smoothed", description: "Bayesian-smoothed recency scoring — reduces overreaction to recent draws", drawFit: 100, antiPop: 0, group: "smoothed", strategyName: "Recency Smoothed" },
   { value: "random_baseline", label: "Random Baseline", description: "Pure random for comparison", drawFit: 0, antiPop: 0, strategyName: "Random" },
 ];
 
@@ -265,8 +269,15 @@ export default function PickGenerator() {
 
                   <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div className="flex items-center space-x-4">
-                      <div className={`w-8 text-center font-mono font-bold text-lg ${i === 0 ? 'text-primary' : 'text-muted-foreground'}`}>
-                        #{pick.rank}
+                      <div className="flex flex-col items-center w-8">
+                        <div className={`text-center font-mono font-bold text-lg ${i === 0 ? 'text-primary' : 'text-muted-foreground'}`}>
+                          #{pick.rank}
+                        </div>
+                        {pick.sourceStrategy && (
+                          <span className="text-[9px] font-mono text-muted-foreground truncate max-w-[80px] text-center leading-tight" title={pick.sourceStrategy}>
+                            {pick.sourceStrategy.replace(/\(.*\)/, "").trim()}
+                          </span>
+                        )}
                       </div>
                       <div className="flex space-x-1.5">
                         {pick.numbers.map((n, idx) => (

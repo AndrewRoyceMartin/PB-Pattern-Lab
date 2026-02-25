@@ -1,0 +1,427 @@
+Replit Plan Work — Forecasting Quality Upgrade Sprint (Top 5)
+Sprint Goal
+
+Improve forecast credibility, benchmark rigor, and generator quality by implementing:
+
+True rolling walk-forward benchmark mode
+
+Random baseline ensemble + seeded runs
+
+Strategy Portfolio (“Best from Each Test”) mode
+
+Bayesian-smoothed frequency strategies
+
+Permutation significance layer
+
+Task 1 — Add true rolling walk-forward benchmark mode
+Scope
+
+Upgrade benchmark validation so strategies can be tested in a real chronological replay mode (train → predict next draw → expand training → repeat), not just fixed holdout.
+
+Requirements
+
+Add benchmark mode selector:
+
+fixed_holdout (existing behavior)
+
+rolling_walk_forward (new)
+
+In rolling mode:
+
+test draw must be excluded from training stats/features
+
+training set expands one draw at a time
+
+Keep current scoring metrics unchanged so comparisons remain fair
+
+Suggested API changes
+
+Add to validation benchmark request:
+
+benchmarkMode: "fixed_holdout" | "rolling_walk_forward"
+
+Add to response metadata:
+
+benchmarkMode
+
+drawRangeUsed
+
+minTrainDraws
+
+Acceptance criteria
+
+Rolling mode runs without leakage
+
+Benchmark response clearly labels mode used
+
+Results differ appropriately from fixed holdout when expected
+
+Existing validation UI still works with fixed holdout mode
+
+Task 2 — Add random baseline ensemble + seeded reproducibility
+Scope
+
+Stabilize the random comparison baseline by replacing single-run random results with an ensemble and make benchmarks reproducible with seeds.
+
+Requirements
+
+Add benchmark config fields:
+
+seed
+
+randomBaselineRuns (e.g. default 200)
+
+Random baseline should produce:
+
+mean metric values
+
+percentile bands / confidence interval (e.g. 5th–95th)
+
+Compute strategy comparisons against:
+
+random mean
+
+percentile rank vs random ensemble (optional v1.5)
+
+Suggested API response additions
+
+For random baseline:
+
+randomEnsembleSummary
+
+runs
+
+seed
+
+mean
+
+p05
+
+p95
+
+stdDev
+
+For each strategy:
+
+deltaVsRandomMean
+
+withinRandomBand (bool)
+
+Acceptance criteria
+
+Same seed + config reproduces benchmark results
+
+Random baseline variance is visible in results
+
+“Beats random” logic uses random ensemble mean/bands (not one random path)
+
+Benchmark metadata records seed and ensemble size
+
+Task 3 — Add Strategy Portfolio mode (“Best from Each Test”)
+Scope
+
+Add a generator mode that builds a mixed 10-game pack from multiple strategies (portfolio), instead of using a single strategy for all cards.
+
+New generator mode
+
+strategy_portfolio
+
+Features
+
+Allocation methods:
+
+equal
+
+validation_weighted
+
+manual
+
+Preset:
+
+Best from Each Test (recommended preset label)
+
+Final diversity-aware selection across merged candidates
+
+Per-card source strategy labels in output
+
+Suggested strategy categories for preset
+
+frequency (e.g. most_drawn)
+
+overdue/recency
+
+structure
+
+anti-popularity
+
+composite
+
+wildcard/random
+
+Acceptance criteria
+
+Generator returns 10 valid cards with sourceStrategy metadata
+
+Portfolio mode can use validation results to allocate slots
+
+Final 10-card set has diversity improvements vs naive concatenation
+
+UI shows source strategy badge for each game
+
+Recommendation engine can recommend portfolio mode in no-edge scenarios
+
+Task 4 — Add Bayesian-smoothed frequency strategies
+Scope
+
+Improve “most drawn” / “least drawn” style strategies by shrinking noisy observed frequencies toward the uniform baseline.
+
+New strategies (minimum)
+
+most_drawn_smoothed_last_50
+
+most_drawn_smoothed_last_20
+
+overdue_capped_smoothed (or recency_smoothed)
+
+(optional) least_drawn_smoothed_last_50
+
+Core idea
+
+For each number:
+
+observed frequency from window
+
+prior belief = uniform probability
+
+smoothed estimate = weighted combination of observed + prior
+
+Use the smoothed score instead of raw count ranking.
+
+Why this matters
+
+reduces overreaction to short-term noise
+
+improves stability in validation
+
+gives a stronger benchmark than raw “hot/cold”
+
+Acceptance criteria
+
+Smoothed strategies appear in generator + validation lists
+
+Benchmarks run successfully across windows
+
+Strategy diagnostics show raw vs smoothed rank (or summary)
+
+Tie-breaking remains deterministic
+
+Task 5 — Add permutation significance testing layer (benchmark + Formula Lab support)
+Scope
+
+Add an experimental significance module to test whether observed benchmark/replay performance could plausibly arise by chance.
+
+v1 target
+
+Implement permutation test for one selected metric, e.g.:
+
+mean_best_total_score_delta_vs_random
+or
+
+mean_best_main_matches_delta_vs_random
+
+How it works (v1)
+
+Preserve strategy generation pipeline
+
+Break feature-outcome relationship (shuffle outcomes / test ordering as designed)
+
+Recompute benchmark metric over many permutations
+
+Compare observed result to null distribution
+
+Return empirical percentile / p-value
+
+API additions
+
+permutationTest request block:
+
+enabled
+
+runs (e.g. 200)
+
+metric
+
+seed
+
+Response:
+
+observed metric
+
+null mean/std
+
+percentile
+
+empirical p-value
+
+caution text
+
+Acceptance criteria
+
+Permutation test can run on at least one strategy + metric
+
+Results are reproducible with seed
+
+UI displays significance result with caveat language
+
+Recommendation engine ignores retrospective-only wins and does not treat untested significance as confirmed signal
+
+Cross-cutting Task — Update recommendation engine logic (as part of Tasks 2–4)
+Scope
+
+Make recommendations depend on stronger evidence from:
+
+rolling walk-forward results
+
+random ensemble comparisons
+
+portfolio mode availability
+
+Rules to add
+
+If no strategy beats random ensemble reliably → recommend:
+
+strategy_portfolio (validation-weighted or best-from-each-test), or
+
+anti_popular_only
+
+If one strategy is weak but unstable → recommend:
+
+balanced or strategy_portfolio
+
+Only elevate confidence when:
+
+rolling replay positive
+
+random ensemble delta positive
+
+(later) permutation support not contradictory
+
+Acceptance criteria
+
+Recommendation panel can surface portfolio mode
+
+Recommendation evidence references benchmark mode + random ensemble settings
+
+Confidence labels become more evidence-based
+
+UI tasks to include in this sprint (minimum viable)
+Validation Page
+
+Add benchmark mode selector (Fixed Holdout / Rolling Walk-Forward)
+
+Add random ensemble runs + seed inputs
+
+Show random baseline band (mean + range)
+
+Add optional permutation test toggle (v1 can be hidden under Advanced)
+
+Generator Page
+
+Add Strategy Portfolio mode
+
+Add “Best from Each Test” preset
+
+Show source strategy per generated game
+
+Show portfolio allocation summary (e.g., 2×Most Drawn, 2×Anti-Popular, etc.)
+
+Formula Lab (if wired this sprint)
+
+Show permutation results as supporting evidence only
+
+Explicit caveat labels remain visible
+
+Acceptance criteria
+
+New controls don’t break existing workflows
+
+Pages remain usable without advanced settings
+
+Defaults produce sensible results immediately
+
+Suggested implementation order (fastest payoff)
+
+Task 1 — rolling walk-forward mode
+
+Task 2 — random ensemble + seeds
+
+Task 3 — strategy portfolio mode
+
+Task 4 — smoothed frequency strategies
+
+Task 5 — permutation layer
+
+This order improves trust first, then generator quality, then advanced significance testing.
+
+Acceptance Test Checklist (end of sprint)
+Benchmark rigor
+
+ Rolling walk-forward mode verified (no leakage)
+
+ Fixed holdout mode still works
+
+ Random ensemble baseline stable and reproducible with seed
+
+ Benchmark metadata includes mode, seed, random runs
+
+Generator quality
+
+ Strategy Portfolio mode returns 10 valid cards
+
+ “Best from Each Test” preset works
+
+ Per-card source strategy labels shown
+
+ Diversity metrics improve vs single-strategy top-10 in at least one comparison
+
+New strategies
+
+ Smoothed frequency strategies compile and run
+
+ Included in benchmark and generator UI
+
+ Deterministic tie-breaking / stable outputs
+
+Significance support
+
+ Permutation test runs for one metric
+
+ Returns empirical p-value/percentile
+
+ UI shows caveated interpretation (not proof of predictive edge)
+
+Recommendation engine
+
+ Can recommend portfolio mode
+
+ Uses benchmark evidence (not just retrospective fit)
+
+ Confidence levels reflect stronger validation setup
+
+Good default settings for first run (after this sprint)
+
+Use these to test quickly:
+
+Benchmark Mode: Rolling Walk-Forward
+
+Windows: 20 / 40 / 60
+
+Min Train Draws: 100
+
+Random Baseline Runs: 200
+
+Seed: 42
+
+Top Games: 10
+
+Portfolio Mode: Best from Each Test (validation-weighted if benchmark exists)
