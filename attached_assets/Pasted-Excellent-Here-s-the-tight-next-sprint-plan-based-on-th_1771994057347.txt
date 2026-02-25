@@ -1,0 +1,474 @@
+Excellent. Here’s the tight next sprint plan based on the latest benchmark export:
+
+confirm the signal in rolling walk-forward
+
+drill into composite variants
+
+make the recommendation regime-aware
+
+simplify the UI to summary first / details on demand
+
+Replit Plan Work — Composite Signal Confirmation Sprint
+Sprint Goal
+
+Validate whether the current strongest candidates (Composite Recency-Heavy, Composite No-Frequency, Diversity Optimized) hold up under stricter testing and make the UI easier to use.
+
+Task 1 — Add “Rolling Confirmation” validation preset
+Scope
+
+Create a one-click preset for a confirmation-grade run (not just screening).
+
+Preset name
+
+Rolling Confirmation (Composite Focus)
+
+Default config
+
+Benchmark mode: rolling_walk_forward
+
+Windows: 20, 40, 60, 100
+
+Random baseline runs: 500 (or 1000 if acceptable)
+
+Seed: 42
+
+Permutation: off by default (separate task)
+
+Regime splits: on (recent/mid/older/full modern)
+
+Strategies included
+
+Core shortlist
+
+composite_recency_heavy
+
+composite_no_frequency
+
+composite
+
+diversity_optimized
+
+Comparators
+
+recency_only
+
+recency_smoothed
+
+random
+
+structure_matched_random
+
+anti_popular_only
+
+Acceptance criteria
+
+Preset appears in Validation UI
+
+One click populates config + strategy selection
+
+Run output clearly labels as “confirmation” and “rolling walk-forward”
+
+Task 2 — Add composite ablation deep-dive set (component attribution)
+Scope
+
+Expand composite family variants to identify which components are actually contributing.
+
+New variants (minimum)
+
+composite_no_recency
+
+composite_no_structure
+
+composite_no_anti_pop
+
+composite_structure_heavy
+
+composite_recency_structure_only (optional but high value)
+
+Why
+
+You already have composite_no_frequency and composite_recency_heavy. This completes the attribution map.
+
+Output requirement
+
+Add a compact component attribution summary:
+
+“Removing recency hurt/improved performance by X”
+
+“Removing frequency improved performance by Y”
+
+Acceptance criteria
+
+New ablation variants run in benchmark
+
+Ablation summary renders (summary-level, not giant table by default)
+
+Composite family can be compared side-by-side cleanly
+
+Task 3 — Add targeted permutation test preset for composite shortlist
+Scope
+
+Run permutation significance only on shortlisted strategies to reduce noise and compute cost.
+
+Preset name
+
+Significance Check (Composite Shortlist)
+
+Default config
+
+Strategies: composite shortlist only
+
+Runs: 500 (advanced option 1000)
+
+Metric: primary delta_vs_random
+
+Scope: all_windows (default), optional by_window
+
+Seed: 42
+
+UI output (summary-first)
+
+Strategy
+
+Observed delta
+
+Null mean
+
+Percentile
+
+Empirical p-value
+
+Verdict badge (inconclusive, supportive, not unusual under null)
+
+Acceptance criteria
+
+Can run multi-strategy permutation in one action
+
+Results shown in compact table
+
+Export available for permutation results
+
+Caveat text shown by default
+
+Task 4 — Add regime-aware recommendation mode (generator)
+Scope
+
+Make the recommendation engine aware that winners differ by regime.
+
+New recommendation outputs
+
+Full-History Recommendation
+
+Recent-Regime Recommendation
+
+Consensus Recommendation (optional v1.5)
+
+Generator presets to support
+
+portfolio_full_history
+
+portfolio_recent_regime
+
+portfolio_consensus
+
+Logic (v1)
+
+If regime winners differ materially:
+
+default to recent-regime portfolio (if user preference = current performance)
+
+show a toggle for full-history stability
+
+If results are consistent across regimes:
+
+use normal validation-weighted portfolio
+
+Acceptance criteria
+
+Recommendation endpoint returns regime-aware recommendation metadata
+
+Generator recommendation card shows selected regime basis
+
+“Apply Recommendation” can apply recent/full-history portfolio settings
+
+Task 5 — Build summary-first Validation UI (verdict-first layout)
+Scope
+
+Reduce clutter and surface only the key results by default.
+
+Default visible sections
+A) Run Summary
+
+Benchmark mode
+
+windows
+
+random runs
+
+seed
+
+regime split status
+
+permutation status
+
+B) Top Candidates (ranked)
+
+strategy
+
+avg delta
+
+stability
+
+tested / beating / losing
+
+significance (if run)
+
+C) Recommendation Impact
+
+generator recommendation (e.g. composite-heavy portfolio)
+
+caveat line (“possible edge pending significance/rolling confirmation”)
+
+D) Underperformers (collapsed chip/list)
+
+grouped summary only
+
+Hidden by default (expandable)
+
+per-window metrics
+
+regime split tables
+
+random ensemble bands
+
+permutation details
+
+raw benchmark metadata JSON
+
+Acceptance criteria
+
+Validation opens with summary-first layout
+
+Details hidden by default
+
+Existing info remains accessible via expanders
+
+No rerun required to toggle details
+
+Task 6 — Add export pack (“Summary + Details + Permutation”) from Validation page
+Scope
+
+Provide one-click exports for drill-down analysis.
+
+Export actions (v1)
+
+Export Summary CSV
+
+Export Detailed CSV
+
+Export Full JSON
+
+Export Permutation CSV (only when available)
+
+Optional: Export All (ZIP) if easy later
+
+Required metadata in every export
+
+benchmark run id
+
+timestamp
+
+benchmark mode
+
+windows
+
+seed
+
+random baseline runs
+
+regime split config
+
+permutation config (if applicable)
+
+strategy preset name
+
+Acceptance criteria
+
+Exports generate filenames with timestamp + run id
+
+Summary CSV is compact and readable
+
+Detailed CSV includes window + regime rows
+
+Full JSON matches on-screen run data
+
+Export works with details collapsed
+
+Task 7 — Add “Show Details” preference + persistent collapse state
+Scope
+
+Let you keep the app clean by default and remember your preference.
+
+UI controls
+
+Show detailed diagnostics toggle
+
+Optional per-section collapse memory:
+
+window metrics
+
+regime splits
+
+permutation details
+
+Persistence
+
+local storage (v1)
+
+Acceptance criteria
+
+Preference persists across reloads
+
+Toggling doesn’t rerun benchmark
+
+Export availability unaffected
+
+Task 8 — Add Drill-Down Queue (investigation workflow)
+Scope
+
+Let you flag interesting results for follow-up analysis and export them.
+
+Features (v1)
+
+“Queue for drill-down” action on strategy rows
+
+Add short note (optional)
+
+Queue panel shows:
+
+strategy
+
+run id
+
+reason/note
+
+timestamp
+
+Export queue notes (CSV/JSON optional)
+
+Why
+
+This supports your workflow:
+
+see a hint of signal
+
+queue it
+
+export
+
+deep dive next sprint
+
+Acceptance criteria
+
+Can queue strategies from benchmark summary
+
+Queue visible and removable
+
+Notes persist at least for current session (local storage preferred)
+
+Composite-focused strategy shortlist for this sprint
+Primary verification candidates
+
+composite_recency_heavy
+
+composite_no_frequency
+
+composite
+
+diversity_optimized
+
+Control / comparators
+
+recency_only
+
+recency_smoothed
+
+random
+
+structure_matched_random
+
+anti_popular_only
+
+This keeps the sprint focused and avoids strategy sprawl.
+
+Updated generator recommendation logic for this sprint
+Default recommendation (if current pattern repeats)
+
+Strategy Portfolio (Validation-Weighted, Composite-Heavy)
+
+Example allocation (10 games)
+
+3 × composite_recency_heavy
+
+2 × composite_no_frequency
+
+2 × diversity_optimized
+
+1 × composite
+
+1 × recency_only
+
+1 × anti_popular_only
+
+Then apply final diversity optimization.
+
+Caveat shown in UI
+
+Composite variants and diversity-optimized generation are currently the strongest candidates in validation. These remain experimental pending rolling confirmation and permutation significance checks.
+
+Suggested implementation order (fastest payoff)
+
+Task 5 summary-first UI
+
+Task 6 exports
+
+Task 1 rolling confirmation preset
+
+Task 2 composite ablations
+
+Task 3 targeted permutation preset
+
+Task 4 regime-aware recommendation
+
+Task 7 detail toggle persistence
+
+Task 8 drill-down queue
+
+Acceptance Test Checklist (end of sprint)
+Signal verification
+
+ Rolling confirmation preset runs successfully
+
+ Composite shortlist benchmark results render cleanly
+
+ Composite ablations compare against baseline composite
+
+ Permutation results available for shortlist strategies
+
+Recommendation quality
+
+ Recommendation can be regime-aware (recent/full-history)
+
+ Generator can apply recommended portfolio mix
+
+ Recommendation clearly states evidence + caveat
+
+UX / workflow
+
+ Validation page is summary-first by default
+
+ Details are collapsible and persist preference
+
+ Export summary/detailed/json works
+
+ Drill-down queue can capture follow-up candidates

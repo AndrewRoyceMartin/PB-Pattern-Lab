@@ -254,6 +254,14 @@ export interface RecommendationEvidence {
   lastBenchmarkAt: string;
 }
 
+export interface RegimeRecommendation {
+  regime: string;
+  bestStrategy: string;
+  bestAvgDelta: number;
+  bestStabilityClass: StabilityClass;
+  recommendedMode: GeneratorMode;
+}
+
 export interface GeneratorRecommendation {
   recommendedMode: GeneratorMode;
   recommendedStrategy: string;
@@ -262,6 +270,10 @@ export interface GeneratorRecommendation {
   evidence: RecommendationEvidence | null;
   strategyBadges: Record<string, StabilityClass>;
   hasBenchmark: boolean;
+  regimeAware?: boolean;
+  regimeRecommendations?: RegimeRecommendation[];
+  regimeBasis?: "full_history" | "recent_regime" | "consensus";
+  regimeCaveat?: string;
 }
 
 // ── Formula Lab types ──

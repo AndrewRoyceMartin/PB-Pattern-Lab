@@ -183,6 +183,27 @@ export default function PickGenerator() {
               )}
             </div>
 
+            {recommendation.regimeAware && recommendation.regimeRecommendations && recommendation.regimeRecommendations.length > 0 && (
+              <div className="mt-3 pt-3 border-t border-border/30 space-y-2">
+                <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground">
+                  <Shield className="w-3 h-3" />
+                  <span>Regime Analysis {recommendation.regimeBasis === "consensus" ? "(consistent)" : recommendation.regimeBasis === "recent_regime" ? "(recent-biased)" : ""}</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {recommendation.regimeRecommendations.map(r => (
+                    <div key={r.regime} className="text-[10px] font-mono px-2 py-1 rounded border border-border/30 bg-secondary/10">
+                      <span className="text-muted-foreground">{r.regime.replace(/_/g, " ")}:</span>{" "}
+                      <span className={r.bestAvgDelta > 0 ? "text-green-500" : "text-muted-foreground"}>{r.bestStrategy}</span>
+                      <span className="text-muted-foreground/60 ml-1">({r.bestAvgDelta >= 0 ? "+" : ""}{r.bestAvgDelta.toFixed(3)})</span>
+                    </div>
+                  ))}
+                </div>
+                {recommendation.regimeCaveat && (
+                  <p className="text-[10px] text-muted-foreground/60 font-mono">{recommendation.regimeCaveat}</p>
+                )}
+              </div>
+            )}
+
             <p className="text-[10px] text-muted-foreground/60 font-mono mt-3">You can override this recommendation manually by selecting any mode below.</p>
           </CardContent>
         </Card>

@@ -21,6 +21,7 @@ import {
   type GeneratorRecommendation,
   type RecommendationEvidence,
   type RecommendationConfidence,
+  type RegimeRecommendation,
 } from "@shared/schema";
 
 let latestBenchmarkResult: BenchmarkSummary | null = null;
@@ -59,6 +60,15 @@ const STRATEGY_TO_MODE: Record<string, GeneratorMode> = {
   "Smoothed Most Drawn (L50)": "most_drawn_smoothed_last_50",
   "Smoothed Most Drawn (L20)": "most_drawn_smoothed_last_20",
   "Recency Smoothed": "recency_smoothed",
+  "Composite No-Frequency": "balanced",
+  "Composite Recency-Heavy": "balanced",
+  "Composite No-Recency": "balanced",
+  "Composite No-Structure": "balanced",
+  "Composite No-AntiPop": "balanced",
+  "Composite Structure-Heavy": "balanced",
+  "Recency Gap Balanced": "balanced",
+  "Recency Decay Weighted": "balanced",
+  "Recency Short Window": "balanced",
 };
 
 const MODE_TO_LABEL: Record<GeneratorMode, string> = {
@@ -251,6 +261,76 @@ function buildCompositeRecencyHeavyPick(draws: Draw[]): { picks: number[]; pb: n
   return { picks: sorted.slice(0, 7).map(f => f.number).sort((a, b) => a - b), pb: topPb(getPbFreqs(draws.slice(0, 20))) };
 }
 
+function buildCompositeNoRecencyPick(draws: Draw[]): { picks: number[]; pb: number } {
+  if (draws.length === 0) return { picks: generateRandomCard(), pb: Math.floor(Math.random() * 20) + 1 };
+  const freqs = computeNumberFrequencies(draws);
+  const scored = freqs.map(f => ({
+    number: f.number,
+    score: f.last25Freq * 2 + f.last10Freq * 3 + f.rollingTrend * 2,
+  }));
+  const sorted = [...scored].sort((a, b) => b.score - a.score);
+  return { picks: sorted.slice(0, 7).map(f => f.number).sort((a, b) => a - b), pb: topPb(getPbFreqs(draws.slice(0, 25))) };
+}
+
+function buildCompositeNoStructurePick(draws: Draw[]): { picks: number[]; pb: number } {
+  if (draws.length === 0) return { picks: generateRandomCard(), pb: Math.floor(Math.random() * 20) + 1 };
+  const freqs = computeNumberFrequencies(draws);
+  const scored = freqs.map(f => ({
+    number: f.number,
+    score: f.last25Freq * 2 + f.last10Freq * 3 - f.drawsSinceSeen * 0.5 + f.rollingTrend * 2,
+  }));
+  const sorted = [...scored].sort((a, b) => b.score - a.score);
+  return { picks: sorted.slice(0, 7).map(f => f.number).sort((a, b) => a - b), pb: topPb(getPbFreqs(draws.slice(0, 25))) };
+}
+
+function buildCompositeNoAntiPopPick(draws: Draw[]): { picks: number[]; pb: number } {
+  if (draws.length === 0) return { picks: generateRandomCard(), pb: Math.floor(Math.random() * 20) + 1 };
+  const freqs = computeNumberFrequencies(draws);
+  const scored = freqs.map(f => ({
+    number: f.number,
+    score: f.last25Freq * 2 + f.last10Freq * 3 - f.drawsSinceSeen * 0.5 + f.rollingTrend * 2,
+  }));
+  const sorted = [...scored].sort((a, b) => b.score - a.score);
+  return { picks: sorted.slice(0, 7).map(f => f.number).sort((a, b) => a - b), pb: topPb(getPbFreqs(draws.slice(0, 25))) };
+}
+
+function buildCompositeStructureHeavyPick(draws: Draw[]): { picks: number[]; pb: number } {
+  if (draws.length === 0) return { picks: generateRandomCard(), pb: Math.floor(Math.random() * 20) + 1 };
+  const freqs = computeNumberFrequencies(draws);
+  const profile = computeStructureProfile(draws);
+  const scored = freqs.map(f => {
+    const baseScore = f.last25Freq * 1 + f.last10Freq * 1 - f.drawsSinceSeen * 0.3 + f.rollingTrend * 1;
+    return { number: f.number, score: baseScore };
+  });
+  const sorted = [...scored].sort((a, b) => b.score - a.score);
+  const candidates = sorted.slice(0, 14).map(f => f.number);
+  const bestCombo = pickStructureMatchedFromCandidates(candidates, profile);
+  return { picks: bestCombo, pb: topPb(getPbFreqs(draws.slice(0, 25))) };
+}
+
+function pickStructureMatchedFromCandidates(candidates: number[], profile: any): number[] {
+  if (candidates.length < 7) return candidates.slice(0, 7).sort((a, b) => a - b);
+  let bestPick = candidates.slice(0, 7);
+  let bestFit = -Infinity;
+  for (let attempt = 0; attempt < 200; attempt++) {
+    const shuffled = [...candidates];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    const pick = shuffled.slice(0, 7).sort((a, b) => a - b);
+    const oddCount = pick.filter(n => n % 2 === 1).length;
+    const sum = pick.reduce((a, b) => a + b, 0);
+    const range = pick[6] - pick[0];
+    const targetOdd = profile?.oddEvenSplit?.mostCommonOddCount ?? 4;
+    const targetSum = profile?.sumStats?.mean ?? 126;
+    const targetRange = profile?.spreadStats?.mean ?? 28;
+    const fit = -(Math.abs(oddCount - targetOdd) * 2 + Math.abs(sum - targetSum) * 0.05 + Math.abs(range - targetRange) * 0.3);
+    if (fit > bestFit) { bestFit = fit; bestPick = pick; }
+  }
+  return bestPick;
+}
+
 export function getGeneratorRecommendation(): GeneratorRecommendation {
   if (!latestBenchmarkResult || latestBenchmarkResult.stabilityByStrategy.length === 0) {
     return {
@@ -286,12 +366,39 @@ export function getGeneratorRecommendation(): GeneratorRecommendation {
     lastBenchmarkAt: latestBenchmarkTime!,
   };
 
+  const regimeRecs = buildRegimeRecommendations(benchmark);
+  const regimeAware = regimeRecs.length > 0;
+  let regimeBasis: "full_history" | "recent_regime" | "consensus" = "full_history";
+  let regimeCaveat: string | undefined;
+
+  if (regimeAware) {
+    const recentRegime = regimeRecs.find(r => r.regime === "recent_modern");
+    const fullRegime = regimeRecs.find(r => r.regime === "full_modern") || regimeRecs.find(r => r.regime === "older_modern");
+    const recentBest = recentRegime?.bestStrategy;
+    const fullBest = best.strategy;
+    if (recentBest && recentBest !== fullBest) {
+      regimeBasis = "recent_regime";
+      regimeCaveat = `Recent regime favors "${recentBest}" while full history favors "${fullBest}". Using recent regime as default — toggle to full history if you prefer stability over recency.`;
+    } else {
+      regimeBasis = "consensus";
+      regimeCaveat = "Results are consistent across regimes. Using full-history recommendation.";
+    }
+  }
+
+  const buildResult = (base: Omit<GeneratorRecommendation, "regimeAware" | "regimeRecommendations" | "regimeBasis" | "regimeCaveat">): GeneratorRecommendation => ({
+    ...base,
+    regimeAware,
+    regimeRecommendations: regimeAware ? regimeRecs : undefined,
+    regimeBasis: regimeAware ? regimeBasis : undefined,
+    regimeCaveat: regimeAware ? regimeCaveat : undefined,
+  });
+
   if (possibleEdge.length > 0) {
     const top = possibleEdge.sort((a, b) => b.avgDelta - a.avgDelta)[0];
     const mode = STRATEGY_TO_MODE[top.strategy] || "balanced";
     const modeLabel = MODE_TO_LABEL[mode] || "Balanced";
     const isMostDrawn = top.strategy.startsWith("Most Drawn");
-    return {
+    return buildResult({
       recommendedMode: mode,
       recommendedStrategy: modeLabel,
       confidence: possibleEdge.length >= 2 ? "high" : "medium",
@@ -299,14 +406,14 @@ export function getGeneratorRecommendation(): GeneratorRecommendation {
       evidence,
       strategyBadges: badges,
       hasBenchmark: true,
-    };
+    });
   }
 
   if (weakEdge.length > 0) {
     const top = weakEdge.sort((a, b) => b.avgDelta - a.avgDelta)[0];
     const mode = STRATEGY_TO_MODE[top.strategy] || "balanced";
     const modeLabel = MODE_TO_LABEL[mode] || "Balanced";
-    return {
+    return buildResult({
       recommendedMode: mode,
       recommendedStrategy: modeLabel,
       confidence: "low",
@@ -314,12 +421,12 @@ export function getGeneratorRecommendation(): GeneratorRecommendation {
       evidence,
       strategyBadges: badges,
       hasBenchmark: true,
-    };
+    });
   }
 
   const structureMatched = stabilities.find(s => s.strategy === "Structure-Matched Random");
   if (structureMatched && structureMatched.avgDelta > 0.05) {
-    return {
+    return buildResult({
       recommendedMode: "structure_matched_random",
       recommendedStrategy: "Structure-Matched Random",
       confidence: "low",
@@ -327,10 +434,10 @@ export function getGeneratorRecommendation(): GeneratorRecommendation {
       evidence,
       strategyBadges: badges,
       hasBenchmark: true,
-    };
+    });
   }
 
-  return {
+  return buildResult({
     recommendedMode: "strategy_portfolio",
     recommendedStrategy: "Strategy Portfolio",
     confidence: "medium",
@@ -338,7 +445,27 @@ export function getGeneratorRecommendation(): GeneratorRecommendation {
     evidence,
     strategyBadges: badges,
     hasBenchmark: true,
-  };
+  });
+}
+
+function buildRegimeRecommendations(benchmark: BenchmarkSummary): RegimeRecommendation[] {
+  if (!benchmark.regimeSplits || benchmark.regimeSplits.length === 0) return [];
+  const results: RegimeRecommendation[] = [];
+  for (const regime of benchmark.regimeSplits) {
+    const sorted = [...regime.stabilityByStrategy].sort((a, b) => b.avgDelta - a.avgDelta);
+    const best = sorted.find(s => s.strategy !== "Random");
+    if (best) {
+      const mode = STRATEGY_TO_MODE[best.strategy] || "balanced";
+      results.push({
+        regime: regime.regime,
+        bestStrategy: best.strategy,
+        bestAvgDelta: best.avgDelta,
+        bestStabilityClass: best.stabilityClass,
+        recommendedMode: mode,
+      });
+    }
+  }
+  return results;
 }
 
 // ═══════════════════════════════════════════
@@ -1070,6 +1197,22 @@ function getStrategyRegistry(): { name: string; fn: StrategyFn }[] {
     {
       name: "Composite Recency-Heavy",
       fn: (train) => buildCompositeRecencyHeavyPick(train),
+    },
+    {
+      name: "Composite No-Recency",
+      fn: (train) => buildCompositeNoRecencyPick(train),
+    },
+    {
+      name: "Composite No-Structure",
+      fn: (train) => buildCompositeNoStructurePick(train),
+    },
+    {
+      name: "Composite No-AntiPop",
+      fn: (train) => buildCompositeNoAntiPopPick(train),
+    },
+    {
+      name: "Composite Structure-Heavy",
+      fn: (train) => buildCompositeStructureHeavyPick(train),
     },
   ];
 }

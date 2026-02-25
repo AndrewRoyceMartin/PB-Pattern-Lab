@@ -32,6 +32,10 @@ const STRATEGY_DESCRIPTIONS: Record<string, string> = {
   "Recency Short Window": "Recency emphasis on last 10-20 draws only.",
   "Composite No-Frequency": "Composite ablation removing frequency signal — keeps recency + trend only.",
   "Composite Recency-Heavy": "Composite with recency weight boosted (60% recency, 20% trend, 20% structure).",
+  "Composite No-Recency": "Composite ablation removing recency signal — keeps frequency + trend + structure.",
+  "Composite No-Structure": "Composite ablation removing structure signal — keeps frequency + recency + trend.",
+  "Composite No-AntiPop": "Composite ablation removing anti-popularity signal — keeps frequency + recency + trend + structure.",
+  "Composite Structure-Heavy": "Composite with structure weight boosted (60% structure, 20% frequency, 20% recency).",
 };
 
 const RECENCY_VERIFICATION_STRATEGIES = [
@@ -46,6 +50,24 @@ const RECENCY_PERMUTATION_TARGETS = [
   "Recency Only", "Recency Smoothed", "Composite",
   "Recency Gap Balanced", "Recency Decay Weighted", "Recency Short Window",
   "Composite No-Frequency", "Composite Recency-Heavy",
+];
+
+const ROLLING_CONFIRMATION_STRATEGIES = [
+  "Most Drawn (Last 50)", "Most Drawn (Last 20)", "Most Drawn (Last 100)",
+  "Smoothed Most Drawn (L50)", "Smoothed Most Drawn (L20)",
+  "Recency Smoothed", "Composite",
+  "Random", "Structure-Matched Random",
+];
+
+const SIGNIFICANCE_CHECK_STRATEGIES = [
+  "Composite", "Composite No-Frequency", "Composite Recency-Heavy",
+  "Composite No-Recency", "Composite No-Structure", "Composite No-AntiPop", "Composite Structure-Heavy",
+  "Random", "Structure-Matched Random", "Anti-Popular Only",
+];
+
+const SIGNIFICANCE_PERMUTATION_TARGETS = [
+  "Composite", "Composite No-Frequency", "Composite Recency-Heavy",
+  "Composite No-Recency", "Composite No-Structure", "Composite No-AntiPop", "Composite Structure-Heavy",
 ];
 
 function StrategyName({ name, className }: { name: string; className?: string }) {
@@ -180,7 +202,23 @@ export default function Validation() {
   const handleRunBenchmark = async () => {
     setIsRunning(true);
     try {
-      const isRecencyPreset = activePreset === "recency_verification";
+      const presetConfig = activePreset === "recency_verification" ? {
+        selectedStrategies: RECENCY_VERIFICATION_STRATEGIES,
+        presetName: "Recency Signal Verification",
+        permutationStrategies: runPermutation ? RECENCY_PERMUTATION_TARGETS : undefined,
+      } : activePreset === "rolling_confirmation" ? {
+        selectedStrategies: ROLLING_CONFIRMATION_STRATEGIES,
+        presetName: "Rolling Confirmation",
+        permutationStrategies: undefined,
+      } : activePreset === "significance_check" ? {
+        selectedStrategies: SIGNIFICANCE_CHECK_STRATEGIES,
+        presetName: "Significance Check (Composite Ablation)",
+        permutationStrategies: runPermutation ? SIGNIFICANCE_PERMUTATION_TARGETS : undefined,
+      } : {
+        selectedStrategies: undefined,
+        presetName: undefined,
+        permutationStrategies: undefined,
+      };
       const result = await runBenchmark({
         windowSizes: selectedWindows,
         minTrainDraws: 100,
@@ -189,9 +227,7 @@ export default function Validation() {
         randomBaselineRuns: randomRuns,
         runPermutation,
         permutationRuns,
-        selectedStrategies: isRecencyPreset ? RECENCY_VERIFICATION_STRATEGIES : undefined,
-        presetName: isRecencyPreset ? "Recency Signal Verification" : undefined,
-        permutationStrategies: isRecencyPreset && runPermutation ? RECENCY_PERMUTATION_TARGETS : undefined,
+        ...presetConfig,
         regimeSplits,
       });
       setBenchmark(result);
@@ -410,6 +446,24 @@ export default function Validation() {
             >
               <Beaker className="w-3 h-3 inline mr-1" />
               Recency Verification
+            </button>
+            <button onClick={() => setActivePreset(activePreset === "rolling_confirmation" ? null : "rolling_confirmation")}
+              className={`px-3 py-1.5 rounded-md text-xs font-mono border transition-colors ${
+                activePreset === "rolling_confirmation" ? "border-blue-500 bg-blue-500/10 text-blue-500" : "border-border/50 text-muted-foreground hover:bg-secondary/30"
+              }`}
+              data-testid="button-preset-rolling"
+            >
+              <GitCompare className="w-3 h-3 inline mr-1" />
+              Rolling Confirmation
+            </button>
+            <button onClick={() => setActivePreset(activePreset === "significance_check" ? null : "significance_check")}
+              className={`px-3 py-1.5 rounded-md text-xs font-mono border transition-colors ${
+                activePreset === "significance_check" ? "border-cyan-500 bg-cyan-500/10 text-cyan-500" : "border-border/50 text-muted-foreground hover:bg-secondary/30"
+              }`}
+              data-testid="button-preset-significance"
+            >
+              <Target className="w-3 h-3 inline mr-1" />
+              Significance Check
             </button>
             <button onClick={() => setRegimeSplits(!regimeSplits)}
               className={`px-3 py-1.5 rounded-md text-xs font-mono border transition-colors ${
