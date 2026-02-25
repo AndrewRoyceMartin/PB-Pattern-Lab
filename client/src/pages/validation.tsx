@@ -1,8 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { AlertCircle, Target, GitCompare, LayoutDashboard, TrendingUp, BarChart3, Info, Play, Loader2, Download, Shield, Beaker, Settings2, History, Eye, ChevronDown, ChevronRight, FileJson, FileText, ListChecks, Bookmark, X, Plus } from "lucide-react";
+import { AlertCircle, Target, GitCompare, LayoutDashboard, TrendingUp, BarChart3, Info, Play, Loader2, Download, Shield, Beaker, Settings2, History, Eye, ChevronDown, ChevronRight, FileJson, FileText, ListChecks, Bookmark, X, Plus, AlertTriangle } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchApi, runBenchmark } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
@@ -70,6 +70,19 @@ const SIGNIFICANCE_PERMUTATION_TARGETS = [
   "Composite No-Recency", "Composite No-Structure", "Composite No-AntiPop", "Composite Structure-Heavy",
 ];
 
+type BenchmarkPreset = "recency_verification" | "rolling_confirmation" | "significance_check" | null;
+
+interface BenchmarkConfigState {
+  windowSizes: number[];
+  benchmarkMode: "fixed_holdout" | "rolling_walk_forward";
+  preset: BenchmarkPreset;
+  regimeSplits: boolean;
+  seed: number;
+  randomBaselineRuns: number;
+  runPermutation: boolean;
+  permutationRuns: number;
+}
+
 function StrategyName({ name, className }: { name: string; className?: string }) {
   const description = STRATEGY_DESCRIPTIONS[name];
   if (!description) return <span className={className}>{name}</span>;
@@ -96,6 +109,17 @@ function StabilityBadge({ stabilityClass }: { stabilityClass: string }) {
       {stabilityClass.replace(/_/g, " ").toUpperCase()}
     </span>
   );
+}
+
+function SignificanceBadge({ strategyName, permutationTests }: { strategyName: string; permutationTests?: any[] }) {
+  const pt = permutationTests?.find((p: any) => p.strategy === strategyName);
+  if (!pt) return <span className="text-[10px] font-mono text-muted-foreground/40">—</span>;
+  const pval = pt.empiricalPValue;
+  const label = pval <= 0.05 ? "Supported" : pval <= 0.20 ? "Suggestive" : "Unsupported";
+  const tone = pval <= 0.05 ? "bg-green-500/15 text-green-500 border-green-500/30" :
+    pval <= 0.20 ? "bg-amber-500/15 text-amber-500 border-amber-500/30" :
+    "bg-muted/50 text-muted-foreground border-border/30";
+  return <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-mono font-bold border ${tone}`}>{label}</span>;
 }
 
 function CollapsibleSection({ title, icon, defaultOpen = false, children, badge, testId }: {
@@ -148,6 +172,62 @@ function getStrategyBg(name: string): string {
   return "";
 }
 
+function RunConfigUsedCard({ cfg, timestamp }: { cfg: BenchmarkRunConfig; timestamp?: string }) {
+  return (
+    <div className="rounded-lg border border-blue-500/30 bg-blue-500/5 p-4" data-testid="card-run-config-used">
+      <h3 className="text-sm font-bold text-blue-300 mb-3 flex items-center gap-2">
+        <Settings2 className="w-4 h-4" /> Run Configuration Used
+      </h3>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs font-mono">
+        <div><span className="text-muted-foreground block mb-0.5">Mode</span><span className="font-bold">{cfg.benchmarkMode === "rolling_walk_forward" ? "Rolling Walk-Forward" : "Fixed Holdout"}</span></div>
+        <div><span className="text-muted-foreground block mb-0.5">Windows</span><span className="font-bold">{cfg.windowSizes.join(", ")}</span></div>
+        <div><span className="text-muted-foreground block mb-0.5">Seed</span><span className="font-bold">{cfg.seed}</span></div>
+        <div><span className="text-muted-foreground block mb-0.5">Random Runs</span><span className="font-bold">{cfg.randomBaselineRuns}</span></div>
+        <div><span className="text-muted-foreground block mb-0.5">Permutation</span><span className="font-bold">{cfg.runPermutation ? `ON (${cfg.permutationRuns} runs)` : "OFF"}</span></div>
+        <div><span className="text-muted-foreground block mb-0.5">Regime Splits</span><span className="font-bold">{cfg.regimeSplits ? "ON" : "OFF"}</span></div>
+        {cfg.presetName && <div><span className="text-muted-foreground block mb-0.5">Preset</span><span className="font-bold">{cfg.presetName}</span></div>}
+        <div><span className="text-muted-foreground block mb-0.5">Data</span><span className="font-bold">{cfg.totalDrawsAvailable} draws</span></div>
+      </div>
+      {timestamp && <div className="mt-2 text-[10px] text-muted-foreground/60 font-mono">Run at: {new Date(timestamp).toLocaleString()}</div>}
+    </div>
+  );
+}
+
+function configsMatch(uiConfig: BenchmarkConfigState, runConfig: BenchmarkRunConfig): boolean {
+  const uiWindows = [...uiConfig.windowSizes].sort((a, b) => a - b);
+  const runWindows = [...runConfig.windowSizes].sort((a, b) => a - b);
+  return (
+    JSON.stringify(uiWindows) === JSON.stringify(runWindows) &&
+    uiConfig.benchmarkMode === runConfig.benchmarkMode &&
+    uiConfig.seed === runConfig.seed &&
+    uiConfig.randomBaselineRuns === runConfig.randomBaselineRuns &&
+    uiConfig.runPermutation === runConfig.runPermutation &&
+    uiConfig.permutationRuns === runConfig.permutationRuns &&
+    (uiConfig.regimeSplits || false) === (runConfig.regimeSplits || false)
+  );
+}
+
+function getPresetStrategies(preset: BenchmarkPreset): { selectedStrategies?: string[]; presetName?: string; permutationStrategies?: string[] } {
+  switch (preset) {
+    case "recency_verification":
+      return { selectedStrategies: RECENCY_VERIFICATION_STRATEGIES, presetName: "Recency Signal Verification" };
+    case "rolling_confirmation":
+      return { selectedStrategies: ROLLING_CONFIRMATION_STRATEGIES, presetName: "Rolling Confirmation" };
+    case "significance_check":
+      return { selectedStrategies: SIGNIFICANCE_CHECK_STRATEGIES, presetName: "Significance Check (Composite Ablation)" };
+    default:
+      return {};
+  }
+}
+
+function getPresetPermutationTargets(preset: BenchmarkPreset): string[] | undefined {
+  switch (preset) {
+    case "recency_verification": return RECENCY_PERMUTATION_TARGETS;
+    case "significance_check": return SIGNIFICANCE_PERMUTATION_TARGETS;
+    default: return undefined;
+  }
+}
+
 export default function Validation() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -159,37 +239,36 @@ export default function Validation() {
   });
 
   const [benchmark, setBenchmark] = useState<BenchmarkSummary | null>(null);
-  const [benchmarkRunMeta, setBenchmarkRunMeta] = useState<{
-    timestamp: string;
-    minTrainDraws: number;
-    permutationRuns: number;
-    windowSizes: number[];
-    mode: string;
-    seed: number;
-    randomBaselineRuns: number;
-    runPermutation: boolean;
-    totalDraws: number;
-  } | null>(null);
+  const [runConfigUsed, setRunConfigUsed] = useState<BenchmarkRunConfig | null>(null);
+  const [runTimestamp, setRunTimestamp] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
-  const [selectedWindows, setSelectedWindows] = useState([20, 40, 60, 100]);
-  const [benchmarkMode, setBenchmarkMode] = useState<"fixed_holdout" | "rolling_walk_forward">("fixed_holdout");
-  const [seed, setSeed] = useState(42);
-  const [randomRuns, setRandomRuns] = useState(200);
-  const [runPermutation, setRunPermutation] = useState(false);
-  const [permutationRuns, setPermutationRuns] = useState(200);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [loadingRunId, setLoadingRunId] = useState<number | null>(null);
   const [showDetails, setShowDetails] = useState(() => {
     try { return localStorage.getItem("validation_show_details") === "true"; } catch { return false; }
   });
-  const [activePreset, setActivePreset] = useState<string | null>(null);
-  const [regimeSplits, setRegimeSplits] = useState(false);
   const [drillDownQueue, setDrillDownQueue] = useState<DrillDownItem[]>(() => {
     try { return JSON.parse(localStorage.getItem("drill_down_queue") || "[]"); } catch { return []; }
   });
   const [drillDownNote, setDrillDownNote] = useState("");
 
+  const [config, setConfig] = useState<BenchmarkConfigState>({
+    windowSizes: [20, 40, 60, 100],
+    benchmarkMode: "fixed_holdout",
+    preset: null,
+    regimeSplits: false,
+    seed: 42,
+    randomBaselineRuns: 200,
+    runPermutation: false,
+    permutationRuns: 200,
+  });
+
   const hasData = validation && validation.verdict !== "insufficient_data";
+
+  const hasMismatch = useMemo(() => {
+    if (!runConfigUsed) return false;
+    return !configsMatch(config, runConfigUsed);
+  }, [config, runConfigUsed]);
 
   useEffect(() => {
     localStorage.setItem("validation_show_details", String(showDetails));
@@ -199,49 +278,88 @@ export default function Validation() {
     localStorage.setItem("drill_down_queue", JSON.stringify(drillDownQueue));
   }, [drillDownQueue]);
 
+  const updateConfig = (updates: Partial<Omit<BenchmarkConfigState, "preset">>) => {
+    setConfig(prev => ({ ...prev, ...updates, preset: null }));
+  };
+
+  const applyPreset = (preset: BenchmarkPreset) => {
+    if (preset === config.preset) {
+      setConfig(prev => ({ ...prev, preset: null }));
+      return;
+    }
+    switch (preset) {
+      case "recency_verification":
+        setConfig(prev => ({
+          ...prev,
+          preset,
+          benchmarkMode: "fixed_holdout",
+          regimeSplits: false,
+          runPermutation: false,
+        }));
+        break;
+      case "rolling_confirmation":
+        setConfig(prev => ({
+          ...prev,
+          preset,
+          benchmarkMode: "rolling_walk_forward",
+          regimeSplits: true,
+          runPermutation: false,
+          randomBaselineRuns: 500,
+        }));
+        break;
+      case "significance_check":
+        setConfig(prev => ({
+          ...prev,
+          preset,
+          benchmarkMode: "rolling_walk_forward",
+          regimeSplits: true,
+          runPermutation: true,
+          permutationRuns: 1000,
+          randomBaselineRuns: 500,
+        }));
+        break;
+    }
+  };
+
   const handleRunBenchmark = async () => {
     setIsRunning(true);
     try {
-      const presetConfig = activePreset === "recency_verification" ? {
-        selectedStrategies: RECENCY_VERIFICATION_STRATEGIES,
-        presetName: "Recency Signal Verification",
-        permutationStrategies: runPermutation ? RECENCY_PERMUTATION_TARGETS : undefined,
-      } : activePreset === "rolling_confirmation" ? {
-        selectedStrategies: ROLLING_CONFIRMATION_STRATEGIES,
-        presetName: "Rolling Confirmation",
-        permutationStrategies: undefined,
-      } : activePreset === "significance_check" ? {
-        selectedStrategies: SIGNIFICANCE_CHECK_STRATEGIES,
-        presetName: "Significance Check (Composite Ablation)",
-        permutationStrategies: runPermutation ? SIGNIFICANCE_PERMUTATION_TARGETS : undefined,
-      } : {
-        selectedStrategies: undefined,
-        presetName: undefined,
-        permutationStrategies: undefined,
-      };
+      const presetInfo = getPresetStrategies(config.preset);
+      const permTargets = config.runPermutation ? getPresetPermutationTargets(config.preset) : undefined;
+
       const result = await runBenchmark({
-        windowSizes: selectedWindows,
+        windowSizes: config.windowSizes,
         minTrainDraws: 100,
-        benchmarkMode,
-        seed,
-        randomBaselineRuns: randomRuns,
-        runPermutation,
-        permutationRuns,
-        ...presetConfig,
-        regimeSplits,
+        benchmarkMode: config.benchmarkMode,
+        seed: config.seed,
+        randomBaselineRuns: config.randomBaselineRuns,
+        runPermutation: config.runPermutation,
+        permutationRuns: config.permutationRuns,
+        selectedStrategies: presetInfo.selectedStrategies,
+        presetName: presetInfo.presetName,
+        permutationStrategies: permTargets,
+        regimeSplits: config.regimeSplits,
       });
       setBenchmark(result);
-      setBenchmarkRunMeta({
-        timestamp: new Date().toISOString(),
-        minTrainDraws: 100,
-        permutationRuns,
-        windowSizes: [...selectedWindows],
-        mode: benchmarkMode,
-        seed,
-        randomBaselineRuns: randomRuns,
-        runPermutation,
-        totalDraws: result.totalDrawsAvailable,
-      });
+      if (result.runConfigUsed) {
+        setRunConfigUsed(result.runConfigUsed);
+      } else {
+        setRunConfigUsed({
+          benchmarkMode: config.benchmarkMode,
+          windowSizes: [...config.windowSizes],
+          minTrainDraws: 100,
+          seed: config.seed,
+          randomBaselineRuns: config.randomBaselineRuns,
+          runPermutation: config.runPermutation,
+          permutationRuns: config.permutationRuns,
+          totalDrawsAvailable: result.totalDrawsAvailable,
+          selectedStrategies: presetInfo.selectedStrategies,
+          presetName: presetInfo.presetName,
+          permutationStrategies: permTargets,
+          regimeSplits: config.regimeSplits,
+        });
+      }
+      setRunTimestamp(result.benchmarkRunTimestamp || new Date().toISOString());
       queryClient.invalidateQueries({ queryKey: ["/api/validation/benchmark/history"] });
       toast({ title: "Benchmark complete", description: `Tested ${result.windowSizesTested.length} windows across ${result.stabilityByStrategy.length} strategies${result.presetName ? ` [${result.presetName}]` : ""}.` });
     } catch (error: any) {
@@ -257,18 +375,8 @@ export default function Validation() {
       const result = await fetchApi(`/api/validation/benchmark/${runId}`);
       if (result?.summary) {
         setBenchmark(result.summary as BenchmarkSummary);
-        const cfg = result.config as BenchmarkRunConfig;
-        setBenchmarkRunMeta({
-          timestamp: result.createdAt,
-          minTrainDraws: cfg.minTrainDraws,
-          permutationRuns: cfg.permutationRuns,
-          windowSizes: cfg.windowSizes,
-          mode: cfg.benchmarkMode,
-          seed: cfg.seed,
-          randomBaselineRuns: cfg.randomBaselineRuns,
-          runPermutation: cfg.runPermutation,
-          totalDraws: cfg.totalDrawsAvailable,
-        });
+        setRunConfigUsed(result.config as BenchmarkRunConfig);
+        setRunTimestamp(result.createdAt);
         toast({ title: "Benchmark loaded", description: `Loaded run #${runId} from history.` });
       }
     } catch (error: any) {
@@ -289,16 +397,20 @@ export default function Validation() {
   };
 
   const toggleWindow = (w: number) => {
-    setSelectedWindows(prev => prev.includes(w) ? prev.filter(x => x !== w) : [...prev, w].sort((a, b) => a - b));
+    setConfig(prev => {
+      const next = prev.windowSizes.includes(w) ? prev.windowSizes.filter(x => x !== w) : [...prev.windowSizes, w].sort((a, b) => a - b);
+      return { ...prev, windowSizes: next, preset: null };
+    });
   };
 
   const exportSummaryCSV = () => {
     if (!benchmark) return;
     const meta = buildMetaRows();
-    const headers = ["Strategy", "Stability", "Windows Tested", "Windows Beating", "Windows Losing", "Avg Delta", "Significance p-value"];
+    const headers = ["Strategy", "Stability", "Significance", "Windows Tested", "Windows Beating", "Windows Losing", "Avg Delta", "Significance p-value"];
     const rows = benchmark.stabilityByStrategy.map(s => {
       const perm = benchmark.permutationTests?.find(p => p.strategy === s.strategy);
-      return [s.strategy, s.stabilityClass, s.windowsTested, s.windowsBeating, s.windowsLosing, s.avgDelta, perm?.empiricalPValue ?? ""].join(",");
+      const sigLabel = perm ? (perm.empiricalPValue <= 0.05 ? "Supported" : perm.empiricalPValue <= 0.20 ? "Suggestive" : "Unsupported") : "";
+      return [s.strategy, s.stabilityClass, sigLabel, s.windowsTested, s.windowsBeating, s.windowsLosing, s.avgDelta, perm?.empiricalPValue ?? ""].join(",");
     });
     downloadCSV([...meta, "", headers.join(","), ...rows, "", `Verdict: ${benchmark.overallVerdict}`].join("\n"), "summary");
   };
@@ -327,7 +439,8 @@ export default function Validation() {
     if (!benchmark) return;
     const data = {
       benchmark,
-      meta: benchmarkRunMeta,
+      runConfigUsed,
+      runTimestamp,
       drillDownQueue,
       exportedAt: new Date().toISOString(),
     };
@@ -340,16 +453,21 @@ export default function Validation() {
     URL.revokeObjectURL(url);
   };
 
-  const buildMetaRows = (): string[] => [
-    "=== Benchmark Configuration ===",
-    `Mode: ${benchmark?.benchmarkMode === "rolling_walk_forward" ? "Rolling Walk-Forward" : "Fixed Holdout"}`,
-    `Windows: ${benchmark?.windowSizesTested?.join(", ") ?? ""}`,
-    `Seed: ${benchmark?.seed ?? ""}`,
-    `Total Draws: ${benchmark?.totalDrawsAvailable ?? ""}`,
-    `Random Baseline Runs: ${benchmark?.randomEnsemble?.runs ?? ""}`,
-    benchmark?.presetName ? `Preset: ${benchmark.presetName}` : "",
-    benchmarkRunMeta ? `Timestamp: ${benchmarkRunMeta.timestamp}` : "",
-  ].filter(Boolean);
+  const buildMetaRows = (): string[] => {
+    const cfg = runConfigUsed;
+    return [
+      "=== Benchmark Configuration (Run Config Used) ===",
+      `Mode: ${cfg?.benchmarkMode === "rolling_walk_forward" ? "Rolling Walk-Forward" : "Fixed Holdout"}`,
+      `Windows: ${cfg?.windowSizes?.join(", ") ?? benchmark?.windowSizesTested?.join(", ") ?? ""}`,
+      `Seed: ${cfg?.seed ?? benchmark?.seed ?? ""}`,
+      `Total Draws: ${cfg?.totalDrawsAvailable ?? benchmark?.totalDrawsAvailable ?? ""}`,
+      `Random Baseline Runs: ${cfg?.randomBaselineRuns ?? benchmark?.randomEnsemble?.runs ?? ""}`,
+      `Permutation: ${cfg?.runPermutation ? `ON (${cfg.permutationRuns} runs)` : "OFF"}`,
+      `Regime Splits: ${cfg?.regimeSplits ? "ON" : "OFF"}`,
+      cfg?.presetName ? `Preset: ${cfg.presetName}` : "",
+      runTimestamp ? `Timestamp: ${runTimestamp}` : "",
+    ].filter(Boolean);
+  };
 
   const downloadCSV = (content: string, type: string) => {
     const blob = new Blob([content], { type: "text/csv" });
@@ -365,6 +483,7 @@ export default function Validation() {
   const noEdgeStrategies = benchmark?.stabilityByStrategy.filter(s => s.stabilityClass === "no_edge") ?? [];
   const underperforming = benchmark?.stabilityByStrategy.filter(s => s.stabilityClass === "underperforming") ?? [];
   const sortedStability = benchmark ? [...benchmark.stabilityByStrategy].sort((a, b) => b.avgDelta - a.avgDelta) : [];
+  const hasPermutation = (benchmark?.permutationTests?.length ?? 0) > 0;
 
   return (
     <div className="space-y-6">
@@ -411,7 +530,7 @@ export default function Validation() {
             {[20, 40, 60, 100].map(w => (
               <button key={w} onClick={() => toggleWindow(w)}
                 className={`px-3 py-1.5 rounded-md text-xs font-mono border transition-colors ${
-                  selectedWindows.includes(w) ? "border-primary bg-primary/10 text-primary" : "border-border/50 text-muted-foreground hover:bg-secondary/30"
+                  config.windowSizes.includes(w) ? "border-primary bg-primary/10 text-primary" : "border-border/50 text-muted-foreground hover:bg-secondary/30"
                 }`}
                 data-testid={`button-window-${w}`}
               >{w} draws</button>
@@ -421,15 +540,15 @@ export default function Validation() {
           <div className="w-px h-6 bg-border mx-1" />
 
           <div className="flex gap-1.5">
-            <button onClick={() => setBenchmarkMode("fixed_holdout")}
+            <button onClick={() => updateConfig({ benchmarkMode: "fixed_holdout" })}
               className={`px-3 py-1.5 rounded-md text-xs font-mono border transition-colors ${
-                benchmarkMode === "fixed_holdout" ? "border-primary bg-primary/10 text-primary" : "border-border/50 text-muted-foreground hover:bg-secondary/30"
+                config.benchmarkMode === "fixed_holdout" ? "border-primary bg-primary/10 text-primary" : "border-border/50 text-muted-foreground hover:bg-secondary/30"
               }`}
               data-testid="button-mode-fixed"
             >Fixed Holdout</button>
-            <button onClick={() => setBenchmarkMode("rolling_walk_forward")}
+            <button onClick={() => updateConfig({ benchmarkMode: "rolling_walk_forward" })}
               className={`px-3 py-1.5 rounded-md text-xs font-mono border transition-colors ${
-                benchmarkMode === "rolling_walk_forward" ? "border-green-500 bg-green-500/10 text-green-500" : "border-border/50 text-muted-foreground hover:bg-secondary/30"
+                config.benchmarkMode === "rolling_walk_forward" ? "border-green-500 bg-green-500/10 text-green-500" : "border-border/50 text-muted-foreground hover:bg-secondary/30"
               }`}
               data-testid="button-mode-rolling"
             >Rolling Walk-Forward</button>
@@ -437,37 +556,37 @@ export default function Validation() {
 
           <div className="w-px h-6 bg-border mx-1" />
 
-          <div className="flex gap-1.5">
-            <button onClick={() => setActivePreset(activePreset === "recency_verification" ? null : "recency_verification")}
+          <div className="flex flex-wrap gap-1.5">
+            <button onClick={() => applyPreset("recency_verification")}
               className={`px-3 py-1.5 rounded-md text-xs font-mono border transition-colors ${
-                activePreset === "recency_verification" ? "border-purple-500 bg-purple-500/10 text-purple-500" : "border-border/50 text-muted-foreground hover:bg-secondary/30"
+                config.preset === "recency_verification" ? "border-purple-500 bg-purple-500/10 text-purple-500" : "border-border/50 text-muted-foreground hover:bg-secondary/30"
               }`}
               data-testid="button-preset-recency"
             >
               <Beaker className="w-3 h-3 inline mr-1" />
               Recency Verification
             </button>
-            <button onClick={() => setActivePreset(activePreset === "rolling_confirmation" ? null : "rolling_confirmation")}
+            <button onClick={() => applyPreset("rolling_confirmation")}
               className={`px-3 py-1.5 rounded-md text-xs font-mono border transition-colors ${
-                activePreset === "rolling_confirmation" ? "border-blue-500 bg-blue-500/10 text-blue-500" : "border-border/50 text-muted-foreground hover:bg-secondary/30"
+                config.preset === "rolling_confirmation" ? "border-blue-500 bg-blue-500/10 text-blue-500" : "border-border/50 text-muted-foreground hover:bg-secondary/30"
               }`}
               data-testid="button-preset-rolling"
             >
               <GitCompare className="w-3 h-3 inline mr-1" />
               Rolling Confirmation
             </button>
-            <button onClick={() => setActivePreset(activePreset === "significance_check" ? null : "significance_check")}
+            <button onClick={() => applyPreset("significance_check")}
               className={`px-3 py-1.5 rounded-md text-xs font-mono border transition-colors ${
-                activePreset === "significance_check" ? "border-cyan-500 bg-cyan-500/10 text-cyan-500" : "border-border/50 text-muted-foreground hover:bg-secondary/30"
+                config.preset === "significance_check" ? "border-cyan-500 bg-cyan-500/10 text-cyan-500" : "border-border/50 text-muted-foreground hover:bg-secondary/30"
               }`}
               data-testid="button-preset-significance"
             >
               <Target className="w-3 h-3 inline mr-1" />
               Significance Check
             </button>
-            <button onClick={() => setRegimeSplits(!regimeSplits)}
+            <button onClick={() => updateConfig({ regimeSplits: !config.regimeSplits })}
               className={`px-3 py-1.5 rounded-md text-xs font-mono border transition-colors ${
-                regimeSplits ? "border-orange-500 bg-orange-500/10 text-orange-500" : "border-border/50 text-muted-foreground hover:bg-secondary/30"
+                config.regimeSplits ? "border-orange-500 bg-orange-500/10 text-orange-500" : "border-border/50 text-muted-foreground hover:bg-secondary/30"
               }`}
               data-testid="button-regime-splits"
             >
@@ -476,6 +595,21 @@ export default function Validation() {
             </button>
           </div>
         </div>
+
+        {config.preset && (
+          <div className="mb-4 p-2 rounded-md border border-border/30 bg-secondary/10 text-xs font-mono text-muted-foreground flex items-center gap-2" data-testid="text-preset-summary">
+            <Info className="w-3 h-3 shrink-0" />
+            <span>
+              Preset <strong className="text-foreground">{config.preset === "recency_verification" ? "Recency Verification" : config.preset === "rolling_confirmation" ? "Rolling Confirmation" : "Significance Check"}</strong>
+              {" → "}
+              {config.benchmarkMode === "rolling_walk_forward" ? "Rolling" : "Fixed"}
+              {config.runPermutation && ` · Permutation ON (${config.permutationRuns})`}
+              {config.regimeSplits && " · Regime Splits"}
+              {config.preset === "rolling_confirmation" && " · 500 random runs"}
+              {config.preset === "significance_check" && " · 500 random runs · 1000 permutation runs"}
+            </span>
+          </div>
+        )}
 
         <button onClick={() => setShowAdvanced(!showAdvanced)}
           className="flex items-center gap-1 text-xs font-mono text-muted-foreground hover:text-foreground transition-colors mb-4"
@@ -488,31 +622,31 @@ export default function Validation() {
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6 p-4 border border-border/50 rounded-md bg-secondary/10">
             <div>
               <label className="text-xs font-mono text-muted-foreground block mb-1">Seed</label>
-              <input type="number" value={seed} onChange={(e) => setSeed(Number(e.target.value) || 42)}
+              <input type="number" value={config.seed} onChange={(e) => updateConfig({ seed: Number(e.target.value) || 42 })}
                 className="w-full px-2 py-1.5 text-xs font-mono bg-background border border-border rounded-md"
                 data-testid="input-seed" />
             </div>
             <div>
               <label className="text-xs font-mono text-muted-foreground block mb-1">Random Runs</label>
-              <input type="number" value={randomRuns} onChange={(e) => setRandomRuns(Math.min(500, Math.max(10, Number(e.target.value) || 200)))}
+              <input type="number" value={config.randomBaselineRuns} onChange={(e) => updateConfig({ randomBaselineRuns: Math.min(500, Math.max(10, Number(e.target.value) || 200)) })}
                 className="w-full px-2 py-1.5 text-xs font-mono bg-background border border-border rounded-md"
                 data-testid="input-random-runs" />
             </div>
             <div>
               <label className="text-xs font-mono text-muted-foreground block mb-1">Permutation Runs</label>
-              <input type="number" value={permutationRuns} onChange={(e) => setPermutationRuns(Math.min(1000, Math.max(10, Number(e.target.value) || 200)))}
+              <input type="number" value={config.permutationRuns} onChange={(e) => updateConfig({ permutationRuns: Math.min(1000, Math.max(10, Number(e.target.value) || 200)) })}
                 className="w-full px-2 py-1.5 text-xs font-mono bg-background border border-border rounded-md"
                 data-testid="input-permutation-runs" />
             </div>
             <div className="flex items-end">
-              <button onClick={() => setRunPermutation(!runPermutation)}
+              <button onClick={() => updateConfig({ runPermutation: !config.runPermutation })}
                 className={`w-full px-3 py-1.5 rounded-md text-xs font-mono border transition-colors ${
-                  runPermutation ? "border-purple-500 bg-purple-500/10 text-purple-500" : "border-border/50 text-muted-foreground hover:bg-secondary/30"
+                  config.runPermutation ? "border-purple-500 bg-purple-500/10 text-purple-500" : "border-border/50 text-muted-foreground hover:bg-secondary/30"
                 }`}
                 data-testid="button-toggle-permutation"
               >
                 <Beaker className="w-3 h-3 inline mr-1" />
-                Permutation {runPermutation ? "ON" : "OFF"}
+                Permutation {config.runPermutation ? "ON" : "OFF"}
               </button>
             </div>
             <div className="flex items-end">
@@ -523,6 +657,17 @@ export default function Validation() {
 
         {benchmark ? (
           <div className="space-y-4">
+            {hasMismatch && (
+              <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 flex items-start gap-2" data-testid="warning-config-mismatch">
+                <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
+                <p className="text-xs text-amber-300 font-mono">
+                  Current UI settings differ from the benchmark run shown below. Results and exports reflect the <strong>Run Configuration Used</strong>, not the current controls. Run a new benchmark to update.
+                </p>
+              </div>
+            )}
+
+            {runConfigUsed && <RunConfigUsedCard cfg={runConfigUsed} timestamp={runTimestamp || undefined} />}
+
             {/* A) TOP SUMMARY — always visible */}
             <Card className={`border-border ${
               edgeStrategies.length > 0 && edgeStrategies.some(s => s.stabilityClass === "possible_edge") ? "border-green-500/30 bg-green-500/5" :
@@ -550,6 +695,7 @@ export default function Validation() {
                             <div key={s.strategy} className="flex items-center gap-1.5 px-2 py-1 rounded bg-secondary/30 border border-border/50">
                               <span className={`text-sm font-mono font-bold ${getStrategyColor(s.strategy)}`}>{s.strategy}</span>
                               <StabilityBadge stabilityClass={s.stabilityClass} />
+                              {hasPermutation && <SignificanceBadge strategyName={s.strategy} permutationTests={benchmark.permutationTests} />}
                               <span className={`text-xs font-mono ${s.avgDelta > 0 ? "text-green-500" : "text-red-500"}`}>
                                 {s.avgDelta >= 0 ? "+" : ""}{s.avgDelta}
                               </span>
@@ -618,13 +764,16 @@ export default function Validation() {
                     <thead className="bg-secondary/50">
                       <tr>
                         <th className="p-2.5 text-muted-foreground font-medium">Strategy</th>
-                        <th className="p-2.5 text-muted-foreground font-medium text-right">Stability</th>
+                        <th className="p-2.5 text-muted-foreground font-medium text-right">Validation</th>
+                        {hasPermutation && (
+                          <th className="p-2.5 text-muted-foreground font-medium text-right">Significance</th>
+                        )}
                         <th className="p-2.5 text-muted-foreground font-medium text-center">Tested</th>
                         <th className="p-2.5 text-muted-foreground font-medium text-center">Beating</th>
                         <th className="p-2.5 text-muted-foreground font-medium text-center">Losing</th>
                         <th className="p-2.5 text-muted-foreground font-medium text-right">Avg Delta</th>
-                        {benchmark.permutationTests?.length > 0 && (
-                          <th className="p-2.5 text-muted-foreground font-medium text-right">Significance</th>
+                        {hasPermutation && (
+                          <th className="p-2.5 text-muted-foreground font-medium text-right">p-value</th>
                         )}
                         <th className="p-2.5 text-muted-foreground font-medium text-center w-10"></th>
                       </tr>
@@ -639,13 +788,18 @@ export default function Validation() {
                               <StrategyName name={s.strategy} />
                             </td>
                             <td className="p-2.5 text-right"><StabilityBadge stabilityClass={s.stabilityClass} /></td>
+                            {hasPermutation && (
+                              <td className="p-2.5 text-right">
+                                <SignificanceBadge strategyName={s.strategy} permutationTests={benchmark.permutationTests} />
+                              </td>
+                            )}
                             <td className="p-2.5 text-center">{s.windowsTested}</td>
                             <td className="p-2.5 text-center text-green-500 font-bold">{s.windowsBeating}</td>
                             <td className="p-2.5 text-center text-red-500 font-bold">{s.windowsLosing}</td>
                             <td className={`p-2.5 text-right font-bold ${s.avgDelta > 0 ? "text-green-500" : s.avgDelta < 0 ? "text-red-500" : ""}`}>
                               {s.avgDelta >= 0 ? "+" : ""}{s.avgDelta}
                             </td>
-                            {benchmark.permutationTests?.length > 0 && (
+                            {hasPermutation && (
                               <td className="p-2.5 text-right">
                                 {perm ? (
                                   <span className={`text-xs font-bold ${
@@ -780,7 +934,7 @@ export default function Validation() {
                     </div>
                     <div className="flex justify-between md:flex-col md:gap-0.5">
                       <span className="text-muted-foreground text-xs">Min Train Draws</span>
-                      <span className="font-bold text-xs">{benchmarkRunMeta?.minTrainDraws ?? 100}</span>
+                      <span className="font-bold text-xs">{runConfigUsed?.minTrainDraws ?? 100}</span>
                     </div>
                     <div className="flex justify-between md:flex-col md:gap-0.5">
                       <span className="text-muted-foreground text-xs">Seed</span>
@@ -788,7 +942,7 @@ export default function Validation() {
                     </div>
                     <div className="flex justify-between md:flex-col md:gap-0.5">
                       <span className="text-muted-foreground text-xs">Random Runs</span>
-                      <span className="font-bold text-xs">{benchmark.randomEnsemble?.runs ?? benchmarkRunMeta?.randomBaselineRuns ?? "--"}</span>
+                      <span className="font-bold text-xs">{benchmark.randomEnsemble?.runs ?? runConfigUsed?.randomBaselineRuns ?? "--"}</span>
                     </div>
                     <div className="flex justify-between md:flex-col md:gap-0.5">
                       <span className="text-muted-foreground text-xs">Permutation</span>
@@ -802,7 +956,7 @@ export default function Validation() {
                     </div>
                     <div className="flex justify-between md:flex-col md:gap-0.5">
                       <span className="text-muted-foreground text-xs">Timestamp</span>
-                      <span className="font-bold text-xs">{benchmarkRunMeta?.timestamp ? new Date(benchmarkRunMeta.timestamp).toLocaleString() : "--"}</span>
+                      <span className="font-bold text-xs">{runTimestamp ? new Date(runTimestamp).toLocaleString() : "--"}</span>
                     </div>
                   </div>
                 </CollapsibleSection>
@@ -840,11 +994,14 @@ export default function Validation() {
                         <div key={i} className="p-3 rounded-md border border-border/50 bg-secondary/10">
                           <div className="flex items-center justify-between mb-2">
                             <span className="text-sm font-mono font-bold">{pt.strategy}</span>
-                            <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded ${
-                              pt.empiricalPValue < 0.05 ? "bg-green-500/20 text-green-500" :
-                              pt.empiricalPValue < 0.2 ? "bg-yellow-500/20 text-yellow-500" :
-                              "bg-muted text-muted-foreground"
-                            }`}>p={pt.empiricalPValue}</span>
+                            <div className="flex items-center gap-2">
+                              <SignificanceBadge strategyName={pt.strategy} permutationTests={benchmark.permutationTests} />
+                              <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded ${
+                                pt.empiricalPValue < 0.05 ? "bg-green-500/20 text-green-500" :
+                                pt.empiricalPValue < 0.2 ? "bg-yellow-500/20 text-yellow-500" :
+                                "bg-muted text-muted-foreground"
+                              }`}>p={pt.empiricalPValue}</span>
+                            </div>
                           </div>
                           <div className="grid grid-cols-4 gap-3 text-xs font-mono text-center mb-2">
                             <div><span className="text-muted-foreground block">Observed</span><span className="font-bold">{pt.observedDelta >= 0 ? "+" : ""}{pt.observedDelta}</span></div>

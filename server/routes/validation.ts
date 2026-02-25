@@ -26,16 +26,29 @@ export function registerValidationRoutes(app: Express): void {
       if (draws.length < 50) {
         return res.status(400).json({ ok: false, message: `Only ${draws.length} modern draws available. Need at least 120 (min window + min training) for benchmark.` });
       }
-      const results = runBenchmarkValidation(draws, windowSizes, minTrainDraws, benchmarkMode, seed, randomBaselineRuns, runPermutation, permutationRuns, selectedStrategies, presetName, permutationStrategies, regimeSplits);
-      storeBenchmarkResult(results);
-
-      const config: BenchmarkRunConfig = {
+      const runConfigUsed: BenchmarkRunConfig = {
         benchmarkMode, windowSizes, minTrainDraws, seed, randomBaselineRuns,
         runPermutation, permutationRuns, totalDrawsAvailable: draws.length,
         selectedStrategies, presetName, permutationStrategies, regimeSplits,
       };
-      const run = await storage.saveBenchmarkRun(config, results);
-      res.json(apiResponse(draws, { ...results, benchmarkRunId: run.id, benchmarkRunTimestamp: run.createdAt }));
+
+      if (process.env.NODE_ENV !== "production") {
+        console.log("[benchmark] runConfigUsed =", {
+          benchmarkMode: runConfigUsed.benchmarkMode,
+          runPermutation: runConfigUsed.runPermutation,
+          permutationRuns: runConfigUsed.permutationRuns,
+          randomBaselineRuns: runConfigUsed.randomBaselineRuns,
+          windowSizes: runConfigUsed.windowSizes,
+          presetName: runConfigUsed.presetName,
+          selectedStrategiesCount: runConfigUsed.selectedStrategies?.length ?? "all",
+        });
+      }
+
+      const results = runBenchmarkValidation(draws, windowSizes, minTrainDraws, benchmarkMode, seed, randomBaselineRuns, runPermutation, permutationRuns, selectedStrategies, presetName, permutationStrategies, regimeSplits);
+      storeBenchmarkResult(results);
+
+      const run = await storage.saveBenchmarkRun(runConfigUsed, results);
+      res.json(apiResponse(draws, { ...results, benchmarkRunId: run.id, benchmarkRunTimestamp: run.createdAt, runConfigUsed }));
     } catch (error: any) {
       res.status(500).json({ ok: false, message: error.message });
     }

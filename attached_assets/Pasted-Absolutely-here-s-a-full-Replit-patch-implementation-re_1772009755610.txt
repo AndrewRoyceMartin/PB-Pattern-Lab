@@ -1,0 +1,593 @@
+Absolutely — here’s a full Replit patch (implementation-ready) to fix the UI mode/export mismatch and make the validation output clearly show what actually ran.
+
+This patch is focused on the bug we just uncovered:
+
+UI can show Rolling Walk-Forward, but an export/result may still be generated as Fixed Holdout.
+
+Patch Goal
+Fix
+
+Preset selection / UI state mismatch
+
+Request payload mismatch (UI → API)
+
+Export metadata mismatch (result → export file)
+
+User confidence issue (show run config used in result header)
+
+Add
+
+single source of truth for benchmark config
+
+run echo metadata from backend
+
+result header “Mode Used”
+
+guardrail warning if UI state ≠ returned run config
+
+dual-layer verdict badges (Validation + Significance)
+
+Patch Summary (what you’ll implement)
+Frontend (Validation page)
+
+Centralize benchmark config in one state object
+
+Presets must update that state object only
+
+Run button must send that exact state object
+
+Exports must export lastResult metadata, not current UI state
+
+Add visible “Run Configuration Used” section
+
+Add mismatch warning if UI state differs from last result metadata
+
+Backend (/api/validation/benchmark)
+
+Echo normalized request config in response (runConfigUsed)
+
+Include benchmarkMode, runPermutation, permutationRuns, seed, etc. in every result payload
+
+Include benchmarkRunId and timestamp consistently
+
+Ensure exports use the exact stored run result payload (not reconstructed config)
+
+Replit Patch — Copy/Paste Task Plan
+Task 1 — Create a single benchmark config state object in Validation UI
+Problem
+
+Mode/preset toggles may be updating separate state variables (e.g. benchmarkMode, selectedPreset, advancedSettings) and the request/export path may be reading stale values.
+
+Patch
+
+Replace scattered state with one canonical object:
+
+type BenchmarkMode = "fixed_holdout" | "rolling_walk_forward";
+
+type ValidationBenchmarkConfig = {
+  windows: number[];
+  benchmarkMode: BenchmarkMode;
+  preset: "custom" | "recency_verification" | "rolling_confirmation" | "significance_check";
+  enableRegimeSplits: boolean;
+  seed: number;
+  randomBaselineRuns: number;
+  runPermutation: boolean;
+  permutationRuns: number;
+  selectedStrategies: string[];
+};
+React state (single source of truth)
+const [benchmarkConfig, setBenchmarkConfig] = useState<ValidationBenchmarkConfig>({
+  windows: [20, 40, 60, 100],
+  benchmarkMode: "fixed_holdout",
+  preset: "custom",
+  enableRegimeSplits: false,
+  seed: 42,
+  randomBaselineRuns: 200,
+  runPermutation: false,
+  permutationRuns: 200,
+  selectedStrategies: [],
+});
+Acceptance criteria
+
+No separate benchmarkMode state outside benchmarkConfig
+
+No separate runPermutation state outside benchmarkConfig
+
+All controls read/write benchmarkConfig
+
+Task 2 — Make presets update the canonical config atomically
+Problem
+
+Preset buttons may be changing strategy selection but not mode/permutation flags consistently.
+
+Patch
+
+Use one preset application function:
+
+function applyBenchmarkPreset(preset: ValidationBenchmarkConfig["preset"]) {
+  setBenchmarkConfig((prev) => {
+    switch (preset) {
+      case "recency_verification":
+        return {
+          ...prev,
+          preset,
+          windows: [20, 40, 60, 100],
+          benchmarkMode: "fixed_holdout",
+          enableRegimeSplits: false,
+          runPermutation: false,
+          randomBaselineRuns: 200,
+          permutationRuns: 200,
+          selectedStrategies: [
+            "recency_only",
+            "recency_smoothed",
+            "composite",
+            "most_drawn_last_20",
+            "smoothed_most_drawn_last_20",
+            "random",
+            "structure_matched_random",
+            "anti_popular_only",
+            "diversity_optimized",
+          ],
+        };
+
+      case "rolling_confirmation":
+        return {
+          ...prev,
+          preset,
+          windows: [20, 40, 60, 100],
+          benchmarkMode: "rolling_walk_forward",
+          enableRegimeSplits: true,
+          runPermutation: false,
+          randomBaselineRuns: 500,
+          permutationRuns: 200,
+          selectedStrategies: [
+            "composite",
+            "composite_recency_heavy",
+            "composite_no_frequency",
+            "composite_no_recency",
+            "composite_no_structure",
+            "composite_no_antipop",
+            "composite_structure_heavy",
+            "random",
+            "structure_matched_random",
+            "anti_popular_only",
+          ],
+        };
+
+      case "significance_check":
+        return {
+          ...prev,
+          preset,
+          windows: [20, 40, 60, 100],
+          benchmarkMode: "rolling_walk_forward", // <-- important
+          enableRegimeSplits: true,
+          runPermutation: true,                  // <-- important
+          randomBaselineRuns: 500,
+          permutationRuns: 1000,
+          selectedStrategies: [
+            "composite",
+            "composite_recency_heavy",
+            "composite_no_frequency",
+            "composite_no_recency",
+            "composite_no_structure",
+            "composite_no_antipop",
+            "composite_structure_heavy",
+          ],
+        };
+
+      default:
+        return { ...prev, preset: "custom" };
+    }
+  });
+}
+Acceptance criteria
+
+Clicking Significance Check always sets:
+
+rolling mode
+
+permutation ON
+
+permutationRuns 1000
+
+composite shortlist only
+
+No stale values survive preset change unless intentionally preserved
+
+Task 3 — Ensure Run Benchmark sends exactly the current config object (no reconstructed payload)
+Problem
+
+Run handler may be building payload from mixed states or cached values.
+
+Patch
+
+Create a request builder that only reads benchmarkConfig.
+
+function buildBenchmarkRequestPayload(config: ValidationBenchmarkConfig) {
+  return {
+    windows: config.windows,
+    benchmarkMode: config.benchmarkMode,
+    enableRegimeSplits: config.enableRegimeSplits,
+    seed: config.seed,
+    randomBaselineRuns: config.randomBaselineRuns,
+    runPermutation: config.runPermutation,
+    permutationRuns: config.permutationRuns,
+    selectedStrategies: config.selectedStrategies,
+    preset: config.preset,
+  };
+}
+
+async function runBenchmark() {
+  const payload = buildBenchmarkRequestPayload(benchmarkConfig);
+  console.log("Running benchmark with payload:", payload);
+
+  const res = await fetch("/api/validation/benchmark", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  const data = await res.json();
+  setLastBenchmarkResult(data);
+}
+Acceptance criteria
+
+Console/debug log matches what UI shows
+
+No hidden defaults override payload on frontend side
+
+Task 4 — Backend: normalize + echo run config as runConfigUsed
+Problem
+
+Even if UI sends correct payload, backend may normalize/fallback values and not expose what it actually used.
+
+Patch (server route)
+
+In /api/validation/benchmark, after parsing request and defaults:
+
+const normalizedConfig = {
+  windows,
+  benchmarkMode,           // normalized enum
+  enableRegimeSplits,
+  seed,
+  randomBaselineRuns,
+  runPermutation,
+  permutationRuns,
+  selectedStrategies,
+  preset: req.body?.preset ?? "custom",
+  generatedAt: new Date().toISOString(),
+};
+
+Then include it in response:
+
+res.json({
+  ...benchmarkResult,
+  benchmarkRunId,
+  runConfigUsed: normalizedConfig,
+});
+Also include in exports
+
+When generating JSON/CSV export metadata, use result.runConfigUsed, not request body or current UI state.
+
+Acceptance criteria
+
+Every benchmark response contains runConfigUsed
+
+runConfigUsed.benchmarkMode matches actual engine execution mode
+
+Exports include the same runConfigUsed
+
+Task 5 — Add hard guardrail: detect and show UI/result mismatch warning
+Problem
+
+Even with fixes, a future regression could silently reintroduce mismatch.
+
+Patch (frontend)
+
+Compare current UI config with lastBenchmarkResult.runConfigUsed.
+
+function shallowComparableConfig(config: ValidationBenchmarkConfig) {
+  return {
+    windows: [...config.windows].sort((a,b)=>a-b),
+    benchmarkMode: config.benchmarkMode,
+    enableRegimeSplits: config.enableRegimeSplits,
+    seed: config.seed,
+    randomBaselineRuns: config.randomBaselineRuns,
+    runPermutation: config.runPermutation,
+    permutationRuns: config.permutationRuns,
+    selectedStrategies: [...config.selectedStrategies].sort(),
+    preset: config.preset,
+  };
+}
+
+function configsMatch(ui: ValidationBenchmarkConfig, used: any) {
+  if (!used) return true;
+  return JSON.stringify(shallowComparableConfig(ui)) === JSON.stringify({
+    windows: [...(used.windows ?? [])].sort((a:number,b:number)=>a-b),
+    benchmarkMode: used.benchmarkMode,
+    enableRegimeSplits: used.enableRegimeSplits,
+    seed: used.seed,
+    randomBaselineRuns: used.randomBaselineRuns,
+    runPermutation: used.runPermutation,
+    permutationRuns: used.permutationRuns,
+    selectedStrategies: [...(used.selectedStrategies ?? [])].sort(),
+    preset: used.preset ?? "custom",
+  });
+}
+
+Display warning if mismatch:
+
+{lastBenchmarkResult?.runConfigUsed && !configsMatch(benchmarkConfig, lastBenchmarkResult.runConfigUsed) && (
+  <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-amber-300">
+    Warning: Current UI settings differ from the benchmark run shown below.
+    Results and exports reflect the <strong>Run Configuration Used</strong>, not the current controls.
+  </div>
+)}
+Acceptance criteria
+
+If user changes UI after a run, warning appears
+
+Prevents confusion when exporting an older result
+
+Task 6 — Add “Run Configuration Used” summary card (verdict-first UX fix)
+Problem
+
+Users can’t easily confirm what actually ran.
+
+Patch (frontend summary card)
+
+Add a compact card above results:
+
+function RunConfigUsedCard({ result }: { result: any }) {
+  const cfg = result?.runConfigUsed;
+  if (!cfg) return null;
+
+  return (
+    <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 p-4">
+      <h3 className="text-lg font-semibold text-blue-200">Run Configuration Used</h3>
+      <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+        <div><span className="opacity-70">Preset</span><div>{cfg.preset}</div></div>
+        <div><span className="opacity-70">Mode</span><div>{cfg.benchmarkMode}</div></div>
+        <div><span className="opacity-70">Windows</span><div>{(cfg.windows || []).join(", ")}</div></div>
+        <div><span className="opacity-70">Regime Splits</span><div>{cfg.enableRegimeSplits ? "ON" : "OFF"}</div></div>
+        <div><span className="opacity-70">Seed</span><div>{cfg.seed}</div></div>
+        <div><span className="opacity-70">Random Runs</span><div>{cfg.randomBaselineRuns}</div></div>
+        <div><span className="opacity-70">Permutation</span><div>{cfg.runPermutation ? "ON" : "OFF"}</div></div>
+        <div><span className="opacity-70">Permutation Runs</span><div>{cfg.runPermutation ? cfg.permutationRuns : "-"}</div></div>
+      </div>
+      {result?.benchmarkRunId && (
+        <div className="mt-3 text-xs opacity-70">Run ID: {result.benchmarkRunId}</div>
+      )}
+    </div>
+  );
+}
+Acceptance criteria
+
+User can instantly confirm mode used
+
+No more ambiguity between UI state and actual run
+
+Task 7 — Export patch: export last result payload, not current state
+Problem
+
+Exports may be rebuilt from current controls instead of the stored result object.
+
+Patch
+
+All export functions should reference lastBenchmarkResult.
+
+function exportBenchmarkJson() {
+  if (!lastBenchmarkResult) return;
+
+  const blob = new Blob(
+    [JSON.stringify(lastBenchmarkResult, null, 2)],
+    { type: "application/json" }
+  );
+  downloadBlob(blob, `benchmark_full_${lastBenchmarkResult.benchmarkRunId ?? Date.now()}.json`);
+}
+
+For CSV metadata rows, extract from lastBenchmarkResult.runConfigUsed.
+
+Acceptance criteria
+
+Exported JSON exactly matches on-screen result object
+
+Export mode always matches Run Configuration Used
+
+Task 8 — Add dual-layer verdict badges (Validation vs Significance)
+Problem
+
+A single “Possible Edge” badge hides the difference between:
+
+benchmark positivity
+
+permutation support
+
+Patch
+
+Add two badges in summary row/cards:
+
+function getValidationBadge(strategy: any) {
+  // Existing stability / avgDelta logic
+  // e.g. possible_edge, weak_edge, no_edge, underperforming
+}
+
+function getSignificanceBadge(strategyName: string, permutationTests: any[]) {
+  const p = permutationTests?.find(t => t.strategyName === strategyName);
+  if (!p) return { label: "Not Tested", tone: "neutral" };
+
+  const pval = p.empiricalPValue;
+  if (pval <= 0.05) return { label: "Supported", tone: "green" };
+  if (pval <= 0.20) return { label: "Suggestive", tone: "amber" };
+  return { label: "Unsupported", tone: "slate" };
+}
+
+Render:
+
+Validation: Possible Edge
+
+Significance: Unsupported
+
+Acceptance criteria
+
+Composite strategies can show e.g.
+
+Validation: Possible Edge
+
+Significance: Unsupported
+
+Users understand “promising but unconfirmed”
+
+Task 9 — Add backend response assertion logging (dev-only)
+Problem
+
+Hard to debug when mode silently changes.
+
+Patch (server)
+
+Add dev log on benchmark route:
+
+if (process.env.NODE_ENV !== "production") {
+  console.log("[benchmark] runConfigUsed =", {
+    benchmarkMode: normalizedConfig.benchmarkMode,
+    runPermutation: normalizedConfig.runPermutation,
+    permutationRuns: normalizedConfig.permutationRuns,
+    randomBaselineRuns: normalizedConfig.randomBaselineRuns,
+    windows: normalizedConfig.windows,
+    preset: normalizedConfig.preset,
+    selectedStrategiesCount: normalizedConfig.selectedStrategies.length,
+  });
+}
+Acceptance criteria
+
+Server logs clearly show actual mode/perm config used for every run
+
+Task 10 — Add preset smoke tests (manual checklist + optional unit tests)
+Manual test checklist (important)
+
+Run each preset and verify Run Configuration Used:
+
+Recency Verification
+
+mode = fixed_holdout
+
+permutation = OFF
+
+Rolling Confirmation
+
+mode = rolling_walk_forward
+
+permutation = OFF
+
+Significance Check
+
+mode = rolling_walk_forward
+
+permutation = ON
+
+permutationRuns = 1000
+
+strategy list = composite shortlist only
+
+Optional frontend unit test (if setup exists)
+
+Test applyBenchmarkPreset("significance_check") returns expected config.
+
+Backend Patch Example (Route Skeleton)
+
+If you want a concrete route pattern, here’s the key structure:
+
+app.post("/api/validation/benchmark", async (req, res) => {
+  try {
+    // 1) Parse + normalize (prefer zod if already added)
+    const windows = Array.isArray(req.body.windows) ? req.body.windows : [20,40,60,100];
+    const benchmarkMode = req.body.benchmarkMode === "rolling_walk_forward"
+      ? "rolling_walk_forward"
+      : "fixed_holdout";
+
+    const enableRegimeSplits = !!req.body.enableRegimeSplits;
+    const seed = Number.isFinite(req.body.seed) ? Number(req.body.seed) : 42;
+    const randomBaselineRuns = Math.min(Math.max(Number(req.body.randomBaselineRuns) || 200, 10), 5000);
+    const runPermutation = !!req.body.runPermutation;
+    const permutationRuns = Math.min(Math.max(Number(req.body.permutationRuns) || 200, 10), 5000);
+
+    const selectedStrategies = Array.isArray(req.body.selectedStrategies)
+      ? req.body.selectedStrategies
+      : [];
+
+    const preset = typeof req.body.preset === "string" ? req.body.preset : "custom";
+
+    const runConfigUsed = {
+      windows,
+      benchmarkMode,
+      enableRegimeSplits,
+      seed,
+      randomBaselineRuns,
+      runPermutation,
+      permutationRuns,
+      selectedStrategies,
+      preset,
+      generatedAt: new Date().toISOString(),
+    };
+
+    // 2) Call engine with normalized values only
+    const benchmarkResult = runMultiWindowBenchmark({
+      windows,
+      benchmarkMode,
+      enableRegimeSplits,
+      seed,
+      randomBaselineRuns,
+      runPermutation,
+      permutationRuns,
+      selectedStrategies,
+    });
+
+    const benchmarkRunId = `bench_${Date.now()}`;
+
+    // 3) Persist optional DB record here (if implemented)
+    // saveBenchmarkRun({ benchmarkRunId, runConfigUsed, benchmarkResult })
+
+    // 4) Return exact run metadata used
+    return res.json({
+      benchmarkRunId,
+      ...benchmarkResult,
+      runConfigUsed,
+    });
+
+  } catch (err) {
+    console.error("Benchmark route error:", err);
+    return res.status(500).json({ error: "Benchmark failed" });
+  }
+});
+Frontend Patch Example (Preset + Run Wiring)
+const [lastBenchmarkResult, setLastBenchmarkResult] = useState<any>(null);
+
+const handlePresetClick = (preset: ValidationBenchmarkConfig["preset"]) => {
+  applyBenchmarkPreset(preset);
+};
+
+const handleRunBenchmark = async () => {
+  const payload = buildBenchmarkRequestPayload(benchmarkConfig);
+
+  const response = await fetch("/api/validation/benchmark", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  const result = await response.json();
+  setLastBenchmarkResult(result);
+};
+UX Patch (what you’ll gain immediately)
+
+After this patch, you’ll be able to tell at a glance:
+
+What preset you clicked
+
+What mode actually ran
+
+Whether permutations were actually on
+
+Whether the displayed result matches current UI controls
+
+That removes the confusion completely.

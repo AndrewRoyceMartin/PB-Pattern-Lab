@@ -22,7 +22,7 @@ Preferred communication style: Simple, everyday language.
 - **Request Validation**: Zod schemas validate all POST endpoints with structured 400 error responses.
 - **Core Engines**:
     - **Pattern Discovery**: Extracts frequency, structure, carryover, and rolling drift patterns.
-    - **Validation**: Walk-forward backtesting (20 strategies), multi-window benchmarking with seeded random ensemble, permutation significance testing, stability classification, benchmark presets, and regime split testing.
+    - **Validation**: Walk-forward backtesting (24 strategies), multi-window benchmarking with seeded random ensemble, permutation significance testing, stability classification, 3 benchmark presets, regime split testing, and config transparency (runConfigUsed echo).
     - **Generator**: Ranked picks via a handler registry (16 modes including frequency benchmarks, Bayesian-smoothed strategies, Strategy Portfolio, Structure-Matched Random, Anti-Popular Only, Diversity Optimized, and Random Baseline).
     - **Formula Lab**: Weighted feature formula optimization, walk-forward replay, Monte Carlo permutation test, and overfit risk diagnostics.
 
@@ -31,6 +31,48 @@ Preferred communication style: Simple, everyday language.
 - **ORM**: Drizzle ORM with `drizzle-zod`.
 - **Schema**: `draws` (historical lottery data), `benchmark_runs` (persisted results), `users` (planned).
 - **Migrations**: Drizzle Kit.
+
+### Validation Engine — Strategy Registry (24 strategies)
+1. Random (seeded ensemble baseline)
+2. Frequency Only
+3. Recency Only
+4. Structure-Aware
+5. Composite (frequency + recency + trend)
+6. Most Drawn (All-Time)
+7. Most Drawn (Last 50)
+8. Most Drawn (Last 100)
+9. Most Drawn (Last 20)
+10. Least Drawn (Last 50)
+11. Structure-Matched Random
+12. Anti-Popular Only
+13. Diversity Optimized
+14. Smoothed Most Drawn (L50)
+15. Smoothed Most Drawn (L20)
+16. Recency Smoothed (Bayesian)
+17. Recency Gap Balanced (moderate gap preference)
+18. Recency Decay Weighted (exponential decay)
+19. Recency Short Window (last 10-20 draws)
+20. Composite No-Frequency (ablation)
+21. Composite Recency-Heavy (60% recency)
+22. Composite No-Recency (ablation)
+23. Composite No-Structure (ablation)
+24. Composite No-AntiPop (ablation)
+25. Composite Structure-Heavy (60% structure) — total 24 non-Random + Random baseline
+
+### Benchmark Presets
+- **Recency Verification**: Fixed holdout, targets recency + composite ablation strategies, no permutation by default.
+- **Rolling Confirmation**: Rolling walk-forward, regime splits ON, 500 random runs.
+- **Significance Check**: Rolling walk-forward, regime splits ON, permutation ON (1000 runs), 500 random runs, targets composite ablation strategies.
+
+### Validation UI Architecture
+- **Results-first layout**: Three tiers — (A) Top Summary always visible, (B) Compact Strategy Results table always visible, (C) Details collapsed by default.
+- **Consolidated config state**: Single `BenchmarkConfigState` object replaces 7+ scattered state variables; atomic preset application via `applyPreset()`.
+- **Config transparency**: `RunConfigUsedCard` displays exact params used per run; amber mismatch warning when UI differs from loaded results; backend echoes `runConfigUsed` in response.
+- **Dual badge system**: Separate "Validation" (StabilityBadge) and "Significance" (SignificanceBadge: Supported/Suggestive/Unsupported) columns in strategy table and summary card.
+- **Preset summary bar**: Shows what the selected preset will configure before running.
+- **Drill-down queue**: Bookmark strategies for follow-up, add notes, persisted in localStorage, included in JSON export.
+- **Four export formats**: CSV Summary, CSV Detailed, CSV Permutation, JSON Full — all use `runConfigUsed` (not current UI state).
+- **Show Details toggle**: Persisted in localStorage; controls visibility of benchmark config, random ensemble, permutation tests, full window×strategy results, single-window validation, rolling window stability, and diagnostics.
 
 ### Key Design Decisions
 1. **Monorepo with shared types**: Ensures type safety across client and server.
@@ -43,7 +85,9 @@ Preferred communication style: Simple, everyday language.
 8. **Reproducibility**: Seeded mulberry32 PRNG for random baselines and Fisher-Yates shuffle for permutation tests.
 9. **Standardized API responses**: Consistent `{ok, meta, data}` format.
 10. **Generator handler registry**: Typed handler map for easy addition of new generation modes.
-11. **Results-first UI**: Validation page uses a three-tier layout for clear presentation of results.
+11. **Results-first UI**: Validation page uses a three-tier layout with summary-first, details on demand.
+12. **Config transparency**: Backend echoes `runConfigUsed` in responses; exports use result payload not current UI state.
+13. **Atomic preset application**: Presets override mode/permutation/regime atomically; manual changes clear preset indicator.
 
 ## External Dependencies
 
