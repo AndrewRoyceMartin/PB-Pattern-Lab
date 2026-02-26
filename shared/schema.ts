@@ -169,6 +169,8 @@ export interface BenchmarkStrategyWindow {
   skippedDraws: number;
 }
 
+export type WorthItClass = "worth_trying" | "promising" | "no_edge" | "underperforming";
+
 export interface BenchmarkStrategyStability {
   strategy: string;
   windowsTested: number;
@@ -176,6 +178,9 @@ export interface BenchmarkStrategyStability {
   windowsLosing: number;
   avgDelta: number;
   stabilityClass: StabilityClass;
+  percentileVsRandom?: number;
+  aboveP95?: boolean;
+  worthIt?: WorthItClass;
 }
 
 export interface BenchmarkPermutationResult {

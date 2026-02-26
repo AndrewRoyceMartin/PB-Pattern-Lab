@@ -1389,7 +1389,23 @@ export function runBenchmarkValidation(
       stabilityClass = "no_edge";
     }
 
-    return { strategy: name, windowsTested, windowsBeating, windowsLosing, avgDelta, stabilityClass };
+    const strategyAvg = rows.length > 0 ? rows.reduce((sum, r) => sum + r.avgMainMatches, 0) / rows.length : 0;
+    const belowCount = sortedE.filter(v => v < strategyAvg).length;
+    const percentileVsRandom = Math.round((belowCount / sortedE.length) * 100);
+    const aboveP95 = strategyAvg > randomEnsemble.p95;
+
+    let worthIt: import("@shared/schema").WorthItClass;
+    if (avgDelta < -0.1) {
+      worthIt = "underperforming";
+    } else if (avgDelta <= 0) {
+      worthIt = "no_edge";
+    } else if (aboveP95) {
+      worthIt = "worth_trying";
+    } else {
+      worthIt = "promising";
+    }
+
+    return { strategy: name, windowsTested, windowsBeating, windowsLosing, avgDelta, stabilityClass, percentileVsRandom, aboveP95, worthIt };
   });
 
   let permutationTests: BenchmarkPermutationResult[] = [];

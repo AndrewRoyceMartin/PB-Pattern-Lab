@@ -33,11 +33,29 @@ interface RunStamp {
   generatedAt: string;
 }
 
+interface ConfidenceData {
+  strategy: string;
+  evidenceSource: "benchmark" | "local_replay" | "none";
+  evidenceLabel: string;
+  deltaVsRandom: number | null;
+  percentileVsRandom: number | null;
+  randomBand: { p05: number; p95: number; mean: number } | null;
+  worthIt: string | null;
+  significance: string | null;
+  benchmarkRunId: number | null;
+  benchmarkDate: string | null;
+  benchmarkMode: string | null;
+  permutationRuns: number | null;
+  overfitRisk?: string;
+  caveatedVerdict?: string;
+}
+
 interface SimpleResult {
   runStamp: RunStamp;
   picks: GeneratedPick[];
   disclaimer: string;
   strategyDescription?: string;
+  confidence?: ConfidenceData;
   optimiserMeta?: {
     weightsUsed: any;
     formulaHash: string;
@@ -96,6 +114,105 @@ function GameLine({ pick, index }: { pick: GeneratedPick; index: number }) {
         </div>
       </div>
     </div>
+  );
+}
+
+function WorthItBadge({ worthIt }: { worthIt: string | null }) {
+  if (!worthIt) return null;
+  const config: Record<string, { label: string; icon: string; cls: string }> = {
+    worth_trying: { label: "Worth trying", icon: "\u2705", cls: "text-green-400 border-green-500/30 bg-green-500/10" },
+    promising: { label: "Promising", icon: "\uD83D\uDFE1", cls: "text-yellow-400 border-yellow-500/30 bg-yellow-500/10" },
+    no_edge: { label: "No edge", icon: "\u26AA", cls: "text-muted-foreground border-border bg-secondary/20" },
+    underperforming: { label: "Underperforming", icon: "\uD83D\uDD34", cls: "text-red-400 border-red-500/30 bg-red-500/10" },
+  };
+  const c = config[worthIt] ?? config.no_edge;
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-mono border ${c.cls}`} data-testid="badge-worth-it">
+      <span>{c.icon}</span> {c.label}
+    </span>
+  );
+}
+
+function SignificanceBadge({ sig }: { sig: string | null }) {
+  if (!sig) return <span className="text-[11px] font-mono text-muted-foreground/60">Not tested</span>;
+  const cls = sig === "Supported" ? "text-green-400" : sig === "Suggestive" ? "text-yellow-400" : "text-muted-foreground";
+  return <span className={`text-[11px] font-mono ${cls}`} data-testid="badge-significance">{sig}</span>;
+}
+
+function ConfidencePanel({ confidence }: { confidence: ConfidenceData }) {
+  if (confidence.evidenceSource === "none") {
+    return (
+      <Card className="border-border/50 bg-secondary/5" data-testid="panel-confidence">
+        <CardContent className="pt-4 pb-3">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Shield className="w-4 h-4" />
+            <span className="font-medium">Confidence</span>
+          </div>
+          <p className="text-xs text-muted-foreground/70 mt-2 font-mono">{confidence.evidenceLabel}</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const delta = confidence.deltaVsRandom;
+  const band = confidence.randomBand;
+
+  return (
+    <Card className="border-border/50 bg-secondary/5" data-testid="panel-confidence">
+      <CardContent className="pt-4 pb-3 space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-sm">
+            <Shield className="w-4 h-4 text-primary" />
+            <span className="font-medium">Confidence</span>
+          </div>
+          <WorthItBadge worthIt={confidence.worthIt} />
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div>
+            <div className="text-[10px] text-muted-foreground/70 uppercase tracking-wide">Strategy</div>
+            <div className="text-xs font-mono text-primary mt-0.5">{confidence.strategy}</div>
+          </div>
+          <div>
+            <div className="text-[10px] text-muted-foreground/70 uppercase tracking-wide">{"\u0394"} vs Random</div>
+            <div className={`text-sm font-bold font-mono mt-0.5 ${delta !== null && delta > 0 ? "text-green-400" : delta !== null && delta < 0 ? "text-red-400" : "text-muted-foreground"}`}>
+              {delta !== null ? (delta >= 0 ? `+${delta.toFixed(2)}` : delta.toFixed(2)) : "--"}
+            </div>
+          </div>
+          <div>
+            <div className="text-[10px] text-muted-foreground/70 uppercase tracking-wide">Percentile</div>
+            <div className="text-sm font-bold font-mono mt-0.5">
+              {confidence.percentileVsRandom !== null ? `${confidence.percentileVsRandom}th` : "--"}
+            </div>
+          </div>
+          <div>
+            <div className="text-[10px] text-muted-foreground/70 uppercase tracking-wide">Significance</div>
+            <div className="mt-0.5"><SignificanceBadge sig={confidence.significance} /></div>
+          </div>
+        </div>
+
+        {band && (
+          <div className="flex items-center gap-2 text-[11px] font-mono text-muted-foreground/70">
+            <span>Random band (5-95):</span>
+            <span>[{band.p05.toFixed(3)}, {band.p95.toFixed(3)}]</span>
+            <span className="text-muted-foreground/50">mean: {band.mean.toFixed(3)}</span>
+          </div>
+        )}
+
+        <div className="text-[10px] font-mono text-muted-foreground/50 border-t border-border/30 pt-2">
+          {confidence.evidenceLabel}
+          {confidence.benchmarkDate && (
+            <span> · Run date: {new Date(confidence.benchmarkDate).toLocaleDateString()}</span>
+          )}
+          {confidence.permutationRuns && (
+            <span> · Permutation runs: {confidence.permutationRuns}</span>
+          )}
+          {confidence.overfitRisk && (
+            <span> · Overfit risk: {confidence.overfitRisk}</span>
+          )}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 

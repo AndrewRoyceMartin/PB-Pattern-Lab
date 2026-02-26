@@ -137,6 +137,9 @@ export function registerAnalysisRoutes(app: Express): void {
             windowsTested: s.windowsTested,
             windowsBeating: s.windowsBeating,
             windowsLosing: s.windowsLosing,
+            percentileVsRandom: s.percentileVsRandom ?? null,
+            aboveP95: s.aboveP95 ?? false,
+            worthIt: s.worthIt ?? null,
           })),
         };
       }

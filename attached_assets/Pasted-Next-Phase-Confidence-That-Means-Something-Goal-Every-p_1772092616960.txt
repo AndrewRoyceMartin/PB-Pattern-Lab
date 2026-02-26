@@ -1,0 +1,160 @@
+Next Phase: Confidence That Means Something
+Goal
+
+Every pick run (CNF lane, Optimised lane, Auto lane) should clearly answer:
+
+How much better than random is this method?
+
+How confident are we it’s not noise?
+
+Is it worth using? (simple decision badge)
+
+What “Confidence” should be (simple and defensible)
+Primary metric (pack-level)
+
+Because you’re generating a 12-line card, the primary measure should be pack-based:
+
+Primary: Δ vs Random Mean (for your chosen backtest metric)
+And always show:
+
+Percentile vs Random (e.g., “78th percentile”)
+
+Random 5–95 band (noise range)
+
+Permutation p-value badge (if available)
+
+“Worth it?” badge (simple rule)
+
+✅ Worth trying: Δ > 0 and above random P95
+
+🟡 Promising: Δ > 0 but inside random band
+
+⚪ No edge: Δ ≤ 0
+
+🔴 Underperforming: clearly below random mean (optional)
+
+This is easy to understand and honest.
+
+Replit Implementation Plan (Copy/Paste)
+Task 1 — Add randomBaselineBand and percentileVsRandom to benchmark outputs
+Backend
+
+When you compute random ensemble results, return:
+
+randomMean
+
+randomP05
+
+randomP95
+
+randomStd
+
+percentileVsRandom for each strategy metric (where possible)
+
+Acceptance
+
+Benchmark summary rows include random band + percentile
+
+Exports include these fields
+
+Task 2 — Add “Worth it?” classification to benchmark rows
+Backend (or frontend derived)
+
+For each strategy:
+
+worthIt = "worth_trying" | "promising" | "no_edge" | "underperforming"
+
+Rule uses:
+
+delta vs random mean
+
+randomP95 threshold
+
+Acceptance
+
+Strategy table shows the badge
+
+Overview and generator can reuse it
+
+Task 3 — Add a Pick Confidence Panel to Pick Generator results
+Frontend
+
+Show a small card above the 12 lines:
+
+Confidence
+
+Strategy: Composite No-Frequency
+
+Δ vs Random: +0.26
+
+Percentile vs Random: 78th
+
+Random band (5–95): [x, y]
+
+Significance: Unsupported/Suggestive/Supported (from permutation)
+
+Worth it: Promising/Worth trying
+
+Data source
+
+If benchmarkRunId exists: pull from persisted benchmark run summary
+
+If Optimised lane: show “local evidence” (replay delta) + label as “not benchmarked unless validated”
+
+Acceptance
+
+Every pick run displays a confidence panel
+
+Panel always references the correct evidence source
+
+Task 4 — Make confidence comparable between CNF and Optimised
+Fix
+
+Standardise “drawFit” scale (0–100) across lanes using min/max normalisation of candidate pool.
+
+Acceptance
+
+CNF drawFit and Optimised drawFit are on same scale
+
+No more 4–7 vs 40–50 confusion
+
+Task 5 — Add “Evidence freshness” and “Last benchmark used” to generator
+Frontend
+
+Under confidence:
+
+“Evidence from benchmarkRunId: ___”
+
+“Run date: ___”
+
+“Mode: rolling walk-forward”
+
+“Permutation runs: 1000 (if present)”
+
+Acceptance
+
+User knows if evidence is current or stale
+
+Task 6 — Add “Update Evidence” button (one click)
+Behaviour (simple)
+
+Runs your Rolling Confirmation preset in background and refreshes confidence panel.
+
+Acceptance
+
+No need to go to Validation page
+
+Doesn’t change picks unless user regenerates
+
+Task 7 — Optimised lane: add explicit evidence label
+Rule
+
+Optimised picks should display:
+
+“Optimised evidence is local (replay-based) unless validated by benchmark.”
+
+If you want: offer button “Validate this optimiser formula” → runs a small benchmark using the same weights.
+
+Acceptance
+
+No confusion about whether optimiser has “proven” itself

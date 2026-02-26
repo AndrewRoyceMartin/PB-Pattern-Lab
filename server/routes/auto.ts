@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { storage } from "../storage";
 import { apiResponse } from "./helpers";
-import type { BenchmarkRunConfig, BenchmarkStrategyStability, GeneratedPick, FormulaWeights } from "@shared/schema";
+import type { BenchmarkRunConfig, BenchmarkStrategyStability, GeneratedPick, FormulaWeights, BenchmarkRun } from "@shared/schema";
 import {
   runBenchmarkValidation,
   storeBenchmarkResult,
@@ -10,6 +10,54 @@ import {
 import { getGeneratorHandler } from "../generator-registry";
 import { runFormulaOptimizer, generateFormulaCard, generateDiverseFormulaCard } from "../formula-lab";
 import crypto from "crypto";
+
+function buildConfidencePanel(strategyName: string, run: BenchmarkRun | null) {
+  if (!run) {
+    return {
+      strategy: strategyName,
+      evidenceSource: "none",
+      evidenceLabel: "No benchmark evidence available. Run Validation to generate evidence.",
+      deltaVsRandom: null,
+      percentileVsRandom: null,
+      randomBand: null,
+      worthIt: null,
+      significance: null,
+      benchmarkRunId: null,
+      benchmarkDate: null,
+      benchmarkMode: null,
+      permutationRuns: null,
+    };
+  }
+
+  const summary = run.summary;
+  const config = run.config;
+  const stab = (summary.stabilityByStrategy || []).find(
+    (s: BenchmarkStrategyStability) => s.strategy === strategyName
+  );
+  const perm = (summary.permutationTests || []).find(
+    (p: any) => p.strategy === strategyName
+  );
+
+  let significance: string | null = null;
+  if (perm) {
+    significance = perm.empiricalPValue < 0.05 ? "Supported" : perm.empiricalPValue < 0.2 ? "Suggestive" : "Unsupported";
+  }
+
+  return {
+    strategy: strategyName,
+    evidenceSource: "benchmark",
+    evidenceLabel: `Evidence from benchmark #${run.id} (${config.benchmarkMode === "rolling_walk_forward" ? "rolling walk-forward" : "fixed holdout"})`,
+    deltaVsRandom: stab?.avgDelta ?? null,
+    percentileVsRandom: stab?.percentileVsRandom ?? null,
+    randomBand: summary.randomEnsemble ? { p05: summary.randomEnsemble.p05, p95: summary.randomEnsemble.p95, mean: summary.randomEnsemble.mean } : null,
+    worthIt: stab?.worthIt ?? null,
+    significance,
+    benchmarkRunId: run.id,
+    benchmarkDate: run.createdAt,
+    benchmarkMode: config.benchmarkMode,
+    permutationRuns: perm?.runs ?? null,
+  };
+}
 
 const AUTO_BENCHMARK_CONFIG = {
   benchmarkMode: "rolling_walk_forward" as const,
@@ -272,9 +320,12 @@ export function registerAutoRoutes(app: Express): void {
         seed,
       });
 
+      const confidence = buildConfidencePanel("Composite No-Frequency", latestRun);
+
       res.json(apiResponse(draws, {
         runStamp,
         picks,
+        confidence,
         strategyDescription: "Composite scoring using recency + trend + structure + carryover. Frequency signals (freqTotal, freqL50, freqL20) are explicitly disabled — set to zero weight.",
         disclaimer: "These picks are generated using historical validation metrics. They are not guaranteed to outperform chance in future draws.",
       }));
@@ -342,9 +393,28 @@ export function registerAutoRoutes(app: Express): void {
         seed,
       });
 
+      const replay = optimiserResult.walkForwardReplay;
+      const confidence = {
+        strategy: "Optimised Formula",
+        evidenceSource: "local_replay",
+        evidenceLabel: "Optimised evidence is local (replay-based) unless validated by benchmark.",
+        deltaVsRandom: replay?.avgDelta ?? null,
+        percentileVsRandom: null as number | null,
+        randomBand: null as { p05: number; p95: number; mean: number } | null,
+        worthIt: (replay?.avgDelta ?? 0) > 0 ? "promising" as const : "no_edge" as const,
+        significance: null as string | null,
+        benchmarkRunId: null as number | null,
+        benchmarkDate: null as string | null,
+        benchmarkMode: null as string | null,
+        permutationRuns: null as number | null,
+        overfitRisk: optimiserResult.overfitRisk,
+        caveatedVerdict: optimiserResult.caveatedVerdict,
+      };
+
       res.json(apiResponse(draws, {
         runStamp,
         picks,
+        confidence,
         optimiserMeta: {
           weightsUsed: bestWeights,
           formulaHash,
