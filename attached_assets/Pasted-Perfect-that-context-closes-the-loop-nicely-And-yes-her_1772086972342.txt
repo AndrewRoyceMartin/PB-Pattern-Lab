@@ -1,0 +1,156 @@
+Perfect — that context closes the loop nicely. And yes: here’s a drop-in tooltip dictionary (plain-English, “does it change picks?” included) plus a simple implementation pattern so you can wire it fast.
+
+Tooltip copy dictionary (JSON)
+
+Use control IDs that match your components (adjust IDs if yours differ). The key thing is consistency: What it is / When to use / Does it change picks?
+
+{
+  "windows.20": {
+    "title": "20 draws",
+    "body": "Tests strategies on the most recent 20 draws. Fastest but noisiest. Use for quick screening.",
+    "changesPicks": "Indirectly (affects which strategy is recommended)."
+  },
+  "windows.40": {
+    "title": "40 draws",
+    "body": "Tests strategies on the most recent 40 draws. Good balance of speed and stability.",
+    "changesPicks": "Indirectly (affects which strategy is recommended)."
+  },
+  "windows.60": {
+    "title": "60 draws",
+    "body": "Tests strategies on the most recent 60 draws. More stable than 20/40, slightly slower.",
+    "changesPicks": "Indirectly (affects which strategy is recommended)."
+  },
+  "windows.100": {
+    "title": "100 draws",
+    "body": "Tests strategies on the most recent 100 draws. Most stable in this set, slowest to run.",
+    "changesPicks": "Indirectly (affects which strategy is recommended)."
+  },
+
+  "benchmark.mode.fixedHoldout": {
+    "title": "Fixed Holdout",
+    "body": "Train on older draws, test on a fixed recent block. Good for fast screening. Less realistic than rolling walk-forward.",
+    "changesPicks": "Indirectly (affects benchmark results and recommendations)."
+  },
+  "benchmark.mode.rollingWalkForward": {
+    "title": "Rolling Walk-Forward",
+    "body": "Most realistic: train → predict next draw → add it to training → repeat. Best for confirmation.",
+    "changesPicks": "Indirectly (affects benchmark results and recommendations)."
+  },
+
+  "preset.recencyVerification": {
+    "title": "Recency Verification",
+    "body": "Runs a focused benchmark on recency-style strategies. Useful for quick checks. Not a final proof step.",
+    "changesPicks": "Indirectly (affects which strategy is recommended)."
+  },
+  "preset.rollingConfirmation": {
+    "title": "Rolling Confirmation",
+    "body": "Runs rolling walk-forward across multiple windows with strong baselines. Use this before trusting any edge.",
+    "changesPicks": "Indirectly (affects which strategy is recommended)."
+  },
+  "preset.significanceCheck": {
+    "title": "Significance Check",
+    "body": "Runs permutation testing to see if the performance looks unusual vs chance. This is the slowest but most meaningful validation step.",
+    "changesPicks": "Indirectly (affects confidence labels and recommendations)."
+  },
+
+  "toggle.regimeSplits": {
+    "title": "Regime Splits",
+    "body": "Evaluates strategies in recent vs mid vs older periods. Useful when signals change over time. Helps choose a regime-aware recommendation.",
+    "changesPicks": "Indirectly (affects which strategy is recommended)."
+  },
+
+  "advanced.seed": {
+    "title": "Seed",
+    "body": "Controls reproducibility. Same seed + same settings = repeatable benchmark results. Composite No-Frequency lane uses a fixed seed for consistency. Optimiser lane uses a run seed recorded in the stamp.",
+    "changesPicks": "Yes (changes random sampling and diversity noise)."
+  },
+  "advanced.randomRuns": {
+    "title": "Random Runs",
+    "body": "How many random baselines are simulated. Higher = more stable comparison and fewer false positives. 500 is a good default.",
+    "changesPicks": "Indirectly (affects benchmark noise and recommendations)."
+  },
+  "advanced.permutationRuns": {
+    "title": "Permutation Runs",
+    "body": "How many shuffle trials are run for significance testing. Higher = more stable p-values. 1000 is a good default for shortlist tests.",
+    "changesPicks": "Indirectly (affects significance labels and recommendation confidence)."
+  },
+  "toggle.permutationOn": {
+    "title": "Permutation ON",
+    "body": "Runs a null test by shuffling outcomes to estimate what ‘chance’ looks like. Doesn’t improve picks, but prevents overconfidence in weak edges.",
+    "changesPicks": "No (it validates evidence; it does not generate picks)."
+  },
+
+  "lane.cnf": {
+    "title": "Composite No-Frequency (Recommended)",
+    "body": "Generates picks using recency + trend + structure + carryover, with ALL long-term frequency weights forced to zero. Fast, reproducible, and aligned with your best-performing validated strategy family.",
+    "changesPicks": "Yes (generates picks immediately using CNF scoring)."
+  },
+  "lane.optimised": {
+    "title": "Optimised (Experimental)",
+    "body": "Runs the optimiser first, then generates picks using the optimiser’s weights. Results include a run stamp showing optimiser run ID, formula hash, and seed used.",
+    "changesPicks": "Yes (optimiser weights directly change generated picks)."
+  },
+
+  "button.autoGenerate12Cnf": {
+    "title": "Generate 12 Picks (CNF)",
+    "body": "Generates 12 lines using Composite No-Frequency. Uses seeded RNG for reproducible results and a diversity noise schedule so you get 12 unique lines.",
+    "changesPicks": "Yes (generates a new 12-line set)."
+  },
+  "button.autoOptimiseAndGenerate12": {
+    "title": "Optimise & Generate 12 (Optimised)",
+    "body": "Runs optimiser → then generates 12 lines. Picks are guaranteed to be based on the optimiser output from the same run (no stale weights).",
+    "changesPicks": "Yes (optimises and generates a new set)."
+  },
+
+  "stamp.strategyName": {
+    "title": "Strategy Name",
+    "body": "Which method produced these lines (e.g., Composite No-Frequency or Optimised).",
+    "changesPicks": "No (it’s a label for this result)."
+  },
+  "stamp.benchmarkRunId": {
+    "title": "Benchmark Run ID",
+    "body": "The benchmark run used to select this strategy (if applicable). Helps trace why the strategy was chosen.",
+    "changesPicks": "No."
+  },
+  "stamp.optimiserUsed": {
+    "title": "Optimiser Used",
+    "body": "Whether the optimiser contributed to these picks. If OFF, optimiser cannot have affected this result.",
+    "changesPicks": "No."
+  },
+  "stamp.optimiserRunId": {
+    "title": "Optimiser Run ID",
+    "body": "Unique ID of the optimiser run that produced the weights used for these picks.",
+    "changesPicks": "No (it identifies the optimiser run)."
+  },
+  "stamp.formulaHash": {
+    "title": "Formula Hash",
+    "body": "A short fingerprint of the weight set used to score numbers. If this changes, your optimiser weights changed.",
+    "changesPicks": "No (it identifies the exact formula used)."
+  },
+  "stamp.generatedAt": {
+    "title": "Generated At",
+    "body": "Timestamp for when this pick set was generated.",
+    "changesPicks": "No."
+  }
+}
+Simple tooltip component pattern (fast wiring)
+
+If you’re using a UI toolkit (Radix/shadcn, etc.), great. If not, this is a lightweight pattern:
+
+1) Store tooltips in one file
+
+client/src/tooltips.ts exporting the JSON object.
+
+2) Create <HelpTip id="..."> component
+
+reads from the dictionary by id
+
+shows title/body + “Changes picks: …”
+
+falls back gracefully if missing
+
+3) Add HelpTip next to each control label
+
+Example:
+
+Rolling Walk-Forward <HelpTip id="benchmark.mode.rollingWalkForward" />

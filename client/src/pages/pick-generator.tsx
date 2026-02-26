@@ -8,6 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { generatePicks, fetchApi, fetchRecommendation, runAutoGenerate, runAutoCompositeNoFrequency, runAutoOptimiseAndGenerate } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
 import type { GeneratedPick, GeneratorMode, GeneratorRecommendation } from "@shared/schema";
+import { HelpTip } from "@/components/help-tip";
 
 function Tip({ label, tip, className }: { label: string; tip: string; className?: string }) {
   return (
@@ -68,13 +69,13 @@ interface SimpleResult {
 function RunStampCard({ stamp }: { stamp: RunStamp }) {
   return (
     <div className="flex flex-wrap gap-x-5 gap-y-1 text-[11px] font-mono text-muted-foreground border border-border/30 rounded-lg px-4 py-2.5 bg-secondary/10" data-testid="card-run-stamp">
-      <span><span className="text-foreground/70">Strategy:</span> {stamp.strategyName}</span>
-      <span><span className="text-foreground/70">Optimiser:</span> {stamp.optimiserUsed ? <span className="text-yellow-500">ON</span> : <span className="text-muted-foreground">OFF</span>}</span>
-      {stamp.optimiserRunId && <span><span className="text-foreground/70">Opt ID:</span> {stamp.optimiserRunId}</span>}
-      {stamp.formulaHash && <span><span className="text-foreground/70">Formula:</span> {stamp.formulaHash}</span>}
-      {stamp.benchmarkRunId && <span><span className="text-foreground/70">Benchmark:</span> #{stamp.benchmarkRunId}</span>}
-      <span><span className="text-foreground/70">Seed:</span> {stamp.seed}</span>
-      <span><span className="text-foreground/70">Generated:</span> {new Date(stamp.generatedAt).toLocaleString()}</span>
+      <span><span className="text-foreground/70">Strategy:<HelpTip id="stamp.strategyName" side="bottom" /></span> {stamp.strategyName}</span>
+      <span><span className="text-foreground/70">Optimiser:<HelpTip id="stamp.optimiserUsed" side="bottom" /></span> {stamp.optimiserUsed ? <span className="text-yellow-500">ON</span> : <span className="text-muted-foreground">OFF</span>}</span>
+      {stamp.optimiserRunId && <span><span className="text-foreground/70">Opt ID:<HelpTip id="stamp.optimiserRunId" side="bottom" /></span> {stamp.optimiserRunId}</span>}
+      {stamp.formulaHash && <span><span className="text-foreground/70">Formula:<HelpTip id="stamp.formulaHash" side="bottom" /></span> {stamp.formulaHash}</span>}
+      {stamp.benchmarkRunId && <span><span className="text-foreground/70">Benchmark:<HelpTip id="stamp.benchmarkRunId" side="bottom" /></span> #{stamp.benchmarkRunId}</span>}
+      <span><span className="text-foreground/70">Seed:<HelpTip id="advanced.seed" side="bottom" /></span> {stamp.seed}</span>
+      <span><span className="text-foreground/70">Generated:<HelpTip id="stamp.generatedAt" side="bottom" /></span> {new Date(stamp.generatedAt).toLocaleString()}</span>
     </div>
   );
 }
@@ -295,7 +296,8 @@ export default function PickGenerator() {
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center text-lg">
                   <Trophy className="w-5 h-5 mr-2 text-green-500" />
-                  <Tip label="Composite No-Frequency" tip="A composite scoring strategy that uses recency + trend + structure + set construction. Does not use long-term 'most drawn' frequency (because long-term frequency has not helped in validation). This is the current validated best strategy." />
+                  Composite No-Frequency
+                  <HelpTip id="lane.cnf" />
                   <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-green-500/20 text-green-500 font-mono font-bold">RECOMMENDED</span>
                 </CardTitle>
                 <CardDescription>
@@ -312,10 +314,10 @@ export default function PickGenerator() {
                 >
                   {isLaneARunning ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <Play className="w-5 h-5 mr-2" />}
                   {isLaneARunning ? "GENERATING..." : "Generate 12 Picks"}
+                  <HelpTip id="button.autoGenerate12Cnf" />
                 </Button>
                 <div className="mt-3 space-y-1 text-[11px] font-mono text-muted-foreground">
-                  <Tip label="Does this change picks?" tip="No optimiser or formula tuning runs. Picks are generated directly using the Composite No-Frequency strategy with fixed weights." className="text-muted-foreground" />
-                  <span className="ml-1">No. Direct generation, fast.</span>
+                  <span>No optimiser involved. Direct generation, fast and reproducible.</span>
                 </div>
               </CardContent>
             </Card>
@@ -324,7 +326,8 @@ export default function PickGenerator() {
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center text-lg">
                   <Beaker className="w-5 h-5 mr-2 text-yellow-500" />
-                  <Tip label="Optimised" tip="Runs the Formula Lab optimiser first to discover the best feature weights from your data, then generates 12 picks using those optimised weights. Always runs fresh — no stale weights." />
+                  Optimised
+                  <HelpTip id="lane.optimised" />
                   <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-500 font-mono font-bold">EXPERIMENTAL</span>
                 </CardTitle>
                 <CardDescription>
@@ -342,10 +345,10 @@ export default function PickGenerator() {
                 >
                   {isLaneBRunning ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <Beaker className="w-5 h-5 mr-2" />}
                   {isLaneBRunning ? laneBStep || "OPTIMISING..." : "Optimise & Generate 12 Picks"}
+                  <HelpTip id="button.autoOptimiseAndGenerate12" />
                 </Button>
                 <div className="mt-3 space-y-1 text-[11px] font-mono text-muted-foreground">
-                  <Tip label="Does this change picks?" tip="Yes. The optimiser searches for the best feature weights for your data, then uses those weights to generate picks. Runs fresh every time — never uses stale weights." className="text-muted-foreground" />
-                  <span className="ml-1">Yes. Optimiser runs first (10-30s).</span>
+                  <span>Optimiser runs first (10-30s). Fresh weights every time.</span>
                 </div>
               </CardContent>
             </Card>

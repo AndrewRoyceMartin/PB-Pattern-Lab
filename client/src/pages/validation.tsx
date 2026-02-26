@@ -7,6 +7,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchApi, runBenchmark } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import type { ValidationSummary, BenchmarkSummary, BenchmarkRunConfig, BenchmarkStrategyStability, RegimeSplitResult } from "@shared/schema";
+import { HelpTip } from "@/components/help-tip";
 
 const STRATEGY_DESCRIPTIONS: Record<string, string> = {
   "Random": "Random ensemble baseline — averaged across multiple seeded runs for stability.",
@@ -181,10 +182,10 @@ function RunConfigUsedCard({ cfg, timestamp }: { cfg: BenchmarkRunConfig; timest
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs font-mono">
         <div><span className="text-muted-foreground block mb-0.5">Mode</span><span className="font-bold">{cfg.benchmarkMode === "rolling_walk_forward" ? "Rolling Walk-Forward" : "Fixed Holdout"}</span></div>
         <div><span className="text-muted-foreground block mb-0.5">Windows</span><span className="font-bold">{cfg.windowSizes.join(", ")}</span></div>
-        <div><span className="text-muted-foreground block mb-0.5">Seed</span><span className="font-bold">{cfg.seed}</span></div>
-        <div><span className="text-muted-foreground block mb-0.5">Random Runs</span><span className="font-bold">{cfg.randomBaselineRuns}</span></div>
-        <div><span className="text-muted-foreground block mb-0.5">Permutation</span><span className="font-bold">{cfg.runPermutation ? `ON (${cfg.permutationRuns} runs)` : "OFF"}</span></div>
-        <div><span className="text-muted-foreground block mb-0.5">Regime Splits</span><span className="font-bold">{cfg.regimeSplits ? "ON" : "OFF"}</span></div>
+        <div><span className="text-muted-foreground block mb-0.5">Seed<HelpTip id="advanced.seed" side="bottom" /></span><span className="font-bold">{cfg.seed}</span></div>
+        <div><span className="text-muted-foreground block mb-0.5">Random Runs<HelpTip id="advanced.randomRuns" side="bottom" /></span><span className="font-bold">{cfg.randomBaselineRuns}</span></div>
+        <div><span className="text-muted-foreground block mb-0.5">Permutation<HelpTip id="toggle.permutationOn" side="bottom" /></span><span className="font-bold">{cfg.runPermutation ? `ON (${cfg.permutationRuns} runs)` : "OFF"}</span></div>
+        <div><span className="text-muted-foreground block mb-0.5">Regime Splits<HelpTip id="toggle.regimeSplits" side="bottom" /></span><span className="font-bold">{cfg.regimeSplits ? "ON" : "OFF"}</span></div>
         {cfg.presetName && <div><span className="text-muted-foreground block mb-0.5">Preset</span><span className="font-bold">{cfg.presetName}</span></div>}
         <div><span className="text-muted-foreground block mb-0.5">Data</span><span className="font-bold">{cfg.totalDrawsAvailable} draws</span></div>
       </div>
@@ -545,13 +546,13 @@ export default function Validation() {
                 config.benchmarkMode === "fixed_holdout" ? "border-primary bg-primary/10 text-primary" : "border-border/50 text-muted-foreground hover:bg-secondary/30"
               }`}
               data-testid="button-mode-fixed"
-            >Fixed Holdout</button>
+            >Fixed Holdout<HelpTip id="benchmark.mode.fixedHoldout" /></button>
             <button onClick={() => updateConfig({ benchmarkMode: "rolling_walk_forward" })}
               className={`px-3 py-1.5 rounded-md text-xs font-mono border transition-colors ${
                 config.benchmarkMode === "rolling_walk_forward" ? "border-green-500 bg-green-500/10 text-green-500" : "border-border/50 text-muted-foreground hover:bg-secondary/30"
               }`}
               data-testid="button-mode-rolling"
-            >Rolling Walk-Forward</button>
+            >Rolling Walk-Forward<HelpTip id="benchmark.mode.rollingWalkForward" /></button>
           </div>
 
           <div className="w-px h-6 bg-border mx-1" />
@@ -564,7 +565,7 @@ export default function Validation() {
               data-testid="button-preset-recency"
             >
               <Beaker className="w-3 h-3 inline mr-1" />
-              Recency Verification
+              Recency Verification<HelpTip id="preset.recencyVerification" />
             </button>
             <button onClick={() => applyPreset("rolling_confirmation")}
               className={`px-3 py-1.5 rounded-md text-xs font-mono border transition-colors ${
@@ -573,7 +574,7 @@ export default function Validation() {
               data-testid="button-preset-rolling"
             >
               <GitCompare className="w-3 h-3 inline mr-1" />
-              Rolling Confirmation
+              Rolling Confirmation<HelpTip id="preset.rollingConfirmation" />
             </button>
             <button onClick={() => applyPreset("significance_check")}
               className={`px-3 py-1.5 rounded-md text-xs font-mono border transition-colors ${
@@ -582,7 +583,7 @@ export default function Validation() {
               data-testid="button-preset-significance"
             >
               <Target className="w-3 h-3 inline mr-1" />
-              Significance Check
+              Significance Check<HelpTip id="preset.significanceCheck" />
             </button>
             <button onClick={() => updateConfig({ regimeSplits: !config.regimeSplits })}
               className={`px-3 py-1.5 rounded-md text-xs font-mono border transition-colors ${
@@ -591,7 +592,7 @@ export default function Validation() {
               data-testid="button-regime-splits"
             >
               <BarChart3 className="w-3 h-3 inline mr-1" />
-              Regime Splits
+              Regime Splits<HelpTip id="toggle.regimeSplits" />
             </button>
           </div>
         </div>
