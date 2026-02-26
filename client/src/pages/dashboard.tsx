@@ -1,8 +1,8 @@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Activity, Database, Trophy, ShieldAlert, ChevronDown, ChevronUp, Info } from "lucide-react";
+import { Activity, Database, Trophy, ShieldAlert, Info } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchApi } from "@/lib/api";
-import { useState } from "react";
+
 
 interface BestStrategy {
   name: string;
@@ -24,6 +24,15 @@ interface CompositeDebug {
   stability: string;
 }
 
+interface StrategyRow {
+  name: string;
+  avgDeltaVsRandom: number;
+  stability: string;
+  windowsTested: number;
+  windowsBeating: number;
+  windowsLosing: number;
+}
+
 interface BestStrategySummary {
   benchmarkRunId: number;
   generatedAt: string;
@@ -39,6 +48,7 @@ interface BestStrategySummary {
   composite: CompositeDebug | null;
   overallVerdict: string;
   strategiesTested: number;
+  allStrategies: StrategyRow[];
 }
 
 interface OverviewData {
@@ -79,8 +89,6 @@ export default function Dashboard() {
     queryKey: ["/api/draws"],
     queryFn: () => fetchApi("/api/draws"),
   });
-
-  const [showDetails, setShowDetails] = useState(false);
 
   const hasData = (overview?.totalDraws ?? 0) > 0;
   const recentDraws = (draws || []).slice(0, 5);
@@ -233,59 +241,51 @@ export default function Dashboard() {
 
         <Card className="border-border flex flex-col">
           <CardHeader>
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle>Strategy Benchmarks</CardTitle>
-                <CardDescription>Walk-forward backtest performance</CardDescription>
-              </div>
-              {bench && (
-                <button
-                  onClick={() => setShowDetails(!showDetails)}
-                  className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                  data-testid="button-show-details"
-                >
-                  {showDetails ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                  {showDetails ? "Hide details" : "Show details"}
-                </button>
-              )}
-            </div>
+            <CardTitle>Strategy Rankings</CardTitle>
+            <CardDescription>All strategies from latest benchmark, ranked by delta vs random</CardDescription>
           </CardHeader>
           <CardContent className="flex-1 flex flex-col">
-            {bench && best ? (
-              <div className="space-y-4">
-                <div className="p-3 rounded-lg border border-primary/30 bg-primary/5">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-primary">{best.name}</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        {best.windowsBeating}/{best.windowsTested} windows beating random
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-lg font-bold font-mono">{formatDelta(best.avgDeltaVsRandom)}</p>
-                      <p className={`text-xs font-mono ${stabilityColor(best.stability)}`}>{best.stability}</p>
-                    </div>
-                  </div>
-                </div>
-
-                {showDetails && bench.composite && best.name !== "Composite" && best.name !== "Composite Model" && (
-                  <div className="p-3 rounded-lg border border-border/50 bg-secondary/20">
-                    <p className="text-xs text-muted-foreground mb-1">Composite (for reference)</p>
-                    <div className="flex items-center justify-between">
-                      <span className={`text-xs font-mono ${stabilityColor(bench.composite.stability)}`}>
-                        {bench.composite.stability}
-                      </span>
-                      <span className="text-sm font-mono">
-                        {formatDelta(bench.composite.avgDeltaVsRandom)}
-                      </span>
-                    </div>
-                    {best.avgDeltaVsRandom > bench.composite.avgDeltaVsRandom && (
-                      <p className="text-xs text-muted-foreground/70 mt-1">
-                        {best.name} outperforms Composite by {(best.avgDeltaVsRandom - bench.composite.avgDeltaVsRandom).toFixed(2)}
-                      </p>
-                    )}
-                  </div>
-                )}
+            {bench && bench.allStrategies?.length > 0 ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm" data-testid="table-strategy-rankings">
+                  <thead>
+                    <tr className="border-b border-border">
+                      <th className="text-left font-medium p-2 text-muted-foreground">#</th>
+                      <th className="text-left font-medium p-2 text-muted-foreground">Strategy</th>
+                      <th className="text-right font-medium p-2 text-muted-foreground">Delta</th>
+                      <th className="text-center font-medium p-2 text-muted-foreground">Windows</th>
+                      <th className="text-right font-medium p-2 text-muted-foreground">Stability</th>
+                    </tr>
+                  </thead>
+                  <tbody className="font-mono text-xs">
+                    {bench.allStrategies.map((s, i) => {
+                      const isBest = i === 0;
+                      return (
+                        <tr
+                          key={s.name}
+                          className={`border-b border-border/50 last:border-0 ${isBest ? "bg-primary/5" : ""}`}
+                          data-testid={`row-strategy-${i}`}
+                        >
+                          <td className="p-2 text-muted-foreground">{i + 1}</td>
+                          <td className={`p-2 ${isBest ? "text-primary font-bold" : ""}`}>
+                            {s.name}
+                            {isBest && <span className="ml-1.5 text-[10px] text-primary/70">BEST</span>}
+                          </td>
+                          <td className={`p-2 text-right font-bold ${s.avgDeltaVsRandom > 0 ? "text-green-400" : s.avgDeltaVsRandom < 0 ? "text-red-400" : "text-muted-foreground"}`}>
+                            {formatDelta(s.avgDeltaVsRandom)}
+                          </td>
+                          <td className="p-2 text-center">
+                            <span className="text-green-400">{s.windowsBeating}</span>
+                            <span className="text-muted-foreground/50">/{s.windowsTested}</span>
+                          </td>
+                          <td className={`p-2 text-right ${stabilityColor(s.stability)}`}>
+                            {s.stability}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             ) : (
               <div className="flex-1 flex flex-col items-center justify-center py-10 text-muted-foreground border border-dashed rounded-lg bg-secondary/20">

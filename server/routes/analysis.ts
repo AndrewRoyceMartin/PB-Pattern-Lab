@@ -129,6 +129,15 @@ export function registerAnalysisRoutes(app: Express): void {
 
           overallVerdict: summary.overallVerdict,
           strategiesTested: (summary.stabilityByStrategy || []).length,
+
+          allStrategies: nonRandom.map((s: BenchmarkStrategyStability) => ({
+            name: s.strategy,
+            avgDeltaVsRandom: s.avgDelta,
+            stability: s.stabilityClass.replace(/_/g, " ").toUpperCase(),
+            windowsTested: s.windowsTested,
+            windowsBeating: s.windowsBeating,
+            windowsLosing: s.windowsLosing,
+          })),
         };
       }
 
