@@ -1,16 +1,103 @@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Activity, Database, Zap, ShieldAlert } from "lucide-react";
+import { Activity, Database, Trophy, ShieldAlert, ChevronDown, ChevronUp, Info } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchApi } from "@/lib/api";
-import type { ValidationSummary } from "@shared/schema";
+import { useState } from "react";
+
+interface BestStrategy {
+  name: string;
+  avgDeltaVsRandom: number;
+  stability: string;
+  windowsTested: number;
+  windowsBeating: number;
+  windowsLosing: number;
+  permutationPValue: number | null;
+}
+
+interface RunnerUp {
+  name: string;
+  avgDeltaVsRandom: number;
+}
+
+interface CompositeDebug {
+  avgDeltaVsRandom: number;
+  stability: string;
+}
+
+interface BestStrategySummary {
+  benchmarkRunId: number;
+  generatedAt: string;
+  benchmarkMode: string;
+  windows: number[];
+  randomBaselineRuns: number | null;
+  runPermutation: boolean;
+  permutationRuns: number | null;
+  presetName: string | null;
+  seed: number;
+  bestStrategy: BestStrategy | null;
+  runnerUp: RunnerUp | null;
+  composite: CompositeDebug | null;
+  overallVerdict: string;
+  strategiesTested: number;
+}
+
+interface OverviewData {
+  totalDraws: number;
+  modernDraws: number;
+  latestDrawDate: string | null;
+  bestStrategySummary: BestStrategySummary | null;
+}
+
+function stabilityColor(stability: string): string {
+  const s = stability.toUpperCase();
+  if (s.includes("UNDERPERFORMING")) return "text-red-500";
+  if (s.includes("NO EDGE")) return "text-muted-foreground";
+  if (s.includes("WEAK EDGE")) return "text-yellow-500";
+  if (s.includes("POSSIBLE EDGE")) return "text-green-500";
+  return "text-muted-foreground";
+}
+
+function verdictColor(verdict: string): string {
+  const v = verdict.toLowerCase().replace(/[_\s]+/g, "_");
+  if (v.includes("possible_edge")) return "text-green-500";
+  if (v.includes("weak_edge")) return "text-yellow-500";
+  if (v.includes("no_edge")) return "text-orange-500";
+  if (v.includes("underperforming")) return "text-red-500";
+  return "text-muted-foreground";
+}
+
+function formatDelta(d: number): string {
+  return d >= 0 ? `+${d.toFixed(2)}` : d.toFixed(2);
+}
 
 export default function Dashboard() {
-  const { data: stats } = useQuery({ queryKey: ["/api/stats"], queryFn: () => fetchApi("/api/stats") });
-  const { data: draws } = useQuery({ queryKey: ["/api/draws"], queryFn: () => fetchApi("/api/draws") });
-  const { data: validation } = useQuery<ValidationSummary>({ queryKey: ["/api/analysis/validation"], queryFn: () => fetchApi("/api/analysis/validation"), enabled: !!stats?.modernDraws });
+  const { data: overview } = useQuery<OverviewData>({
+    queryKey: ["/api/system/overview"],
+    queryFn: () => fetchApi("/api/system/overview"),
+  });
+  const { data: draws } = useQuery({
+    queryKey: ["/api/draws"],
+    queryFn: () => fetchApi("/api/draws"),
+  });
 
-  const hasData = stats?.totalDraws > 0;
+  const [showDetails, setShowDetails] = useState(false);
+
+  const hasData = (overview?.totalDraws ?? 0) > 0;
   const recentDraws = (draws || []).slice(0, 5);
+  const bench = overview?.bestStrategySummary;
+  const best = bench?.bestStrategy;
+
+  const verdictLabel = best
+    ? best.stability
+    : bench?.overallVerdict
+      ? bench.overallVerdict.replace(/[_]/g, " ").toUpperCase()
+      : "--";
+
+  const verdictClass = best
+    ? stabilityColor(best.stability)
+    : bench?.overallVerdict
+      ? verdictColor(bench.overallVerdict)
+      : "text-muted-foreground";
 
   return (
     <div className="space-y-6">
@@ -28,8 +115,8 @@ export default function Dashboard() {
             <Database className="w-4 h-4 text-primary" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold font-mono" data-testid="text-total-draws">{stats?.totalDraws?.toLocaleString() ?? "0"}</div>
-            <p className="text-xs text-muted-foreground mt-1 font-mono">Latest: {stats?.latestDate ?? "None"}</p>
+            <div className="text-2xl font-bold font-mono" data-testid="text-total-draws">{overview?.totalDraws?.toLocaleString() ?? "0"}</div>
+            <p className="text-xs text-muted-foreground mt-1 font-mono">Latest: {overview?.latestDrawDate ?? "None"}</p>
           </CardContent>
         </Card>
 
@@ -39,41 +126,72 @@ export default function Dashboard() {
             <Activity className="w-4 h-4 text-blue-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold font-mono" data-testid="text-modern-draws">{stats?.modernDraws?.toLocaleString() ?? "0"}</div>
+            <div className="text-2xl font-bold font-mono" data-testid="text-modern-draws">{overview?.modernDraws?.toLocaleString() ?? "0"}</div>
             <p className="text-xs text-muted-foreground mt-1 font-mono">{hasData ? "7+1 format" : "Awaiting data"}</p>
           </CardContent>
         </Card>
 
         <Card className="bg-card border-border shadow-sm">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Validation Verdict</CardTitle>
-            <ShieldAlert className={`w-4 h-4 ${validation?.verdict === "possible_edge" ? "text-green-500" : validation?.verdict === "weak_edge" ? "text-yellow-500" : "text-muted-foreground"}`} />
+            <CardTitle className="text-sm font-medium text-muted-foreground">Overall Verdict</CardTitle>
+            <ShieldAlert className={`w-4 h-4 ${verdictClass}`} />
           </CardHeader>
           <CardContent>
-            <div className={`text-2xl font-bold font-mono ${
-              validation?.verdict === "possible_edge" ? "text-green-500" :
-              validation?.verdict === "weak_edge" ? "text-yellow-500" :
-              validation?.verdict === "no_edge" ? "text-orange-500" : "text-muted-foreground"
-            }`}>
-              {validation?.verdict ? validation.verdict.replace(/_/g, " ").toUpperCase() : "--"}
+            <div className={`text-2xl font-bold font-mono ${verdictClass}`} data-testid="text-verdict">
+              {bench ? verdictLabel : "--"}
             </div>
-            <p className="text-xs text-muted-foreground mt-1 font-mono">Walk-forward tested</p>
+            <p className="text-xs text-muted-foreground mt-1 font-mono">
+              {bench
+                ? `From latest benchmark (${bench.benchmarkMode === "rolling_walk_forward" ? "rolling" : "fixed"})`
+                : "Run Validation first"}
+            </p>
           </CardContent>
         </Card>
 
         <Card className="bg-card border-border shadow-sm">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Composite vs Random</CardTitle>
-            <Zap className="w-4 h-4 text-yellow-500" />
+            <CardTitle className="text-sm font-medium text-muted-foreground">Best Strategy vs Random</CardTitle>
+            <Trophy className="w-4 h-4 text-yellow-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold font-mono">
-              {validation?.diagnostics ? `${validation.diagnostics.compositeVsRandomDelta >= 0 ? "+" : ""}${validation.diagnostics.compositeVsRandomDelta}` : "--"}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1 font-mono">{hasData ? "Avg main match delta" : "Awaiting data"}</p>
+            {best ? (
+              <>
+                <div className="text-2xl font-bold font-mono" data-testid="text-best-delta">
+                  {formatDelta(best.avgDeltaVsRandom)}
+                </div>
+                <p className="text-xs text-muted-foreground mt-1 font-mono">Avg main match delta</p>
+                <p className="text-xs text-primary mt-0.5 font-mono">{best.name}</p>
+                {bench?.runnerUp && (
+                  <p className="text-xs text-muted-foreground/70 mt-0.5 font-mono">
+                    Runner-up: {bench.runnerUp.name} ({formatDelta(bench.runnerUp.avgDeltaVsRandom)})
+                  </p>
+                )}
+              </>
+            ) : (
+              <>
+                <div className="text-2xl font-bold font-mono text-muted-foreground" data-testid="text-best-delta">--</div>
+                <p className="text-xs text-muted-foreground mt-1 font-mono">
+                  {hasData ? "No benchmark run yet" : "Awaiting data"}
+                </p>
+              </>
+            )}
           </CardContent>
         </Card>
       </div>
+
+      {bench && (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground/70 font-mono px-1">
+          <Info className="w-3 h-3 flex-shrink-0" />
+          <span>
+            Benchmark #{bench.benchmarkRunId} · {bench.benchmarkMode === "rolling_walk_forward" ? "rolling" : "fixed holdout"}
+            {bench.windows?.length ? ` · windows: ${bench.windows.join("/")}` : ""}
+            {bench.randomBaselineRuns ? ` · random runs: ${bench.randomBaselineRuns}` : ""}
+            {bench.runPermutation ? ` · perm: ${bench.permutationRuns ?? "on"}` : " · perm: off"}
+            {bench.presetName ? ` · preset: ${bench.presetName}` : ""}
+            {bench.strategiesTested ? ` · ${bench.strategiesTested} strategies` : ""}
+          </span>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
         <Card className="border-border flex flex-col">
@@ -115,39 +233,64 @@ export default function Dashboard() {
 
         <Card className="border-border flex flex-col">
           <CardHeader>
-            <CardTitle>Strategy Benchmarks</CardTitle>
-            <CardDescription>Walk-forward backtest performance</CardDescription>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Strategy Benchmarks</CardTitle>
+                <CardDescription>Walk-forward backtest performance</CardDescription>
+              </div>
+              {bench && (
+                <button
+                  onClick={() => setShowDetails(!showDetails)}
+                  className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  data-testid="button-show-details"
+                >
+                  {showDetails ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                  {showDetails ? "Hide details" : "Show details"}
+                </button>
+              )}
+            </div>
           </CardHeader>
           <CardContent className="flex-1 flex flex-col">
-            {validation && validation.byStrategy.length > 0 ? (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border">
-                      <th className="text-left font-medium p-2 text-muted-foreground">Strategy</th>
-                      <th className="text-right font-medium p-2 text-muted-foreground">Avg Main</th>
-                      <th className="text-right font-medium p-2 text-muted-foreground">Best</th>
-                      <th className="text-right font-medium p-2 text-muted-foreground">PB Hit%</th>
-                    </tr>
-                  </thead>
-                  <tbody className="font-mono text-xs">
-                    {validation.byStrategy.map((result, i) => (
-                      <tr key={i} className="border-b border-border/50 last:border-0">
-                        <td className={`p-3 ${result.strategy === 'Composite Model' ? 'text-primary font-bold' : ''}`}>
-                          {result.strategy}
-                        </td>
-                        <td className="p-3 text-right">{result.avgMainMatches}</td>
-                        <td className="p-3 text-right">{result.bestMainMatches}</td>
-                        <td className="p-3 text-right">{result.powerballHitRate}%</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            {bench && best ? (
+              <div className="space-y-4">
+                <div className="p-3 rounded-lg border border-primary/30 bg-primary/5">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-primary">{best.name}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {best.windowsBeating}/{best.windowsTested} windows beating random
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-lg font-bold font-mono">{formatDelta(best.avgDeltaVsRandom)}</p>
+                      <p className={`text-xs font-mono ${stabilityColor(best.stability)}`}>{best.stability}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {showDetails && bench.composite && best.name !== "Composite" && best.name !== "Composite Model" && (
+                  <div className="p-3 rounded-lg border border-border/50 bg-secondary/20">
+                    <p className="text-xs text-muted-foreground mb-1">Composite (for reference)</p>
+                    <div className="flex items-center justify-between">
+                      <span className={`text-xs font-mono ${stabilityColor(bench.composite.stability)}`}>
+                        {bench.composite.stability}
+                      </span>
+                      <span className="text-sm font-mono">
+                        {formatDelta(bench.composite.avgDeltaVsRandom)}
+                      </span>
+                    </div>
+                    {best.avgDeltaVsRandom > bench.composite.avgDeltaVsRandom && (
+                      <p className="text-xs text-muted-foreground/70 mt-1">
+                        {best.name} outperforms Composite by {(best.avgDeltaVsRandom - bench.composite.avgDeltaVsRandom).toFixed(2)}
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
             ) : (
               <div className="flex-1 flex flex-col items-center justify-center py-10 text-muted-foreground border border-dashed rounded-lg bg-secondary/20">
                 <ShieldAlert className="w-8 h-8 mb-2 opacity-50" />
-                <p className="font-mono text-sm">{hasData && stats?.modernDraws < 50 ? "Need 50+ modern draws." : "Validation pending."}</p>
+                <p className="font-mono text-sm">{hasData && (overview?.modernDraws ?? 0) < 50 ? "Need 50+ modern draws." : "Run Validation to generate evidence."}</p>
               </div>
             )}
           </CardContent>

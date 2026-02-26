@@ -10,7 +10,7 @@ Preferred communication style: Simple, everyday language.
 
 ### Frontend
 - **Framework**: React with TypeScript, Vite
-- **Routing**: Wouter, supporting Dashboard, CSV Ingest, Pattern Lab, Validation, Pick Generator, and Formula Lab.
+- **Routing**: Wouter, supporting System Overview (Dashboard), CSV Ingest, Pattern Lab, Validation, Pick Generator, and Formula Lab.
 - **UI Components**: shadcn/ui (New York style) built on Radix UI and Tailwind CSS.
 - **State Management**: TanStack React Query for server state, local React state for UI.
 - **Styling**: Tailwind CSS v4, dark mode by default, Inter and JetBrains Mono fonts.
@@ -100,6 +100,7 @@ Preferred communication style: Simple, everyday language.
 11. **Results-first UI**: Validation page uses a three-tier layout with summary-first, details on demand.
 12. **Config transparency**: Backend echoes `runConfigUsed` in responses; exports use result payload not current UI state.
 13. **Atomic preset application**: Presets override mode/permutation/regime atomically; manual changes clear preset indicator.
+14. **Data-driven System Overview**: Dashboard tiles reflect actual benchmark winner (Best Strategy vs Random), not hardcoded Composite. Verdict, delta, runner-up, and benchmark metadata all pulled from `GET /api/system/overview` which reads latest persisted benchmark run.
 
 ## External Dependencies
 

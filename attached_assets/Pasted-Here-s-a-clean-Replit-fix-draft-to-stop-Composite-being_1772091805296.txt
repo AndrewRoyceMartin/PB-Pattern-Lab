@@ -1,0 +1,210 @@
+Here’s a clean Replit fix draft to stop “Composite” being implied as the best, and to make System Overview reflect the actual benchmark winner.
+
+Fix Goal
+
+On System Overview, replace the tile:
+
+✅ “Composite vs Random”
+with
+
+✅ “Best Strategy vs Random” (from latest benchmark run)
+
+…and make the verdict tile reflect best strategy, not composite-only.
+
+What the UI should show (simple)
+New tiles (4)
+
+Total Draws (unchanged)
+
+Modern Era (unchanged)
+
+Overall Verdict (based on best strategy)
+
+Best Strategy vs Random (winner + delta)
+
+Optional (small line under tile 4):
+
+“Runner-up: …”
+
+Replit Patch Plan (copy/paste)
+Task 1 — Add a “latest benchmark winner” selector on the backend
+Where
+
+server/analysis.ts (or wherever benchmark results are stored / latest run is tracked)
+
+What to expose
+
+Create helper:
+
+getLatestBenchmarkSummary() returning:
+
+{
+  benchmarkRunId: string | null,
+  generatedAt: string | null,
+  benchmarkMode: "fixed_holdout" | "rolling_walk_forward" | null,
+  windows: number[],
+  randomBaselineRuns: number | null,
+  runPermutation: boolean,
+  permutationRuns: number | null,
+
+  bestStrategy: {
+    name: string,
+    avgDeltaVsRandom: number,
+    stability: "UNDERPERFORMING" | "NO EDGE" | "WEAK EDGE" | "POSSIBLE EDGE",
+    percentileVsRandom?: number,        // if available
+    outsideRandomBand?: boolean         // if available
+  },
+
+  runnerUp?: { name: string, avgDeltaVsRandom: number },
+
+  composite?: { avgDeltaVsRandom: number, stability: string } // optional for debugging
+}
+Selection rule (simple)
+
+Pick bestStrategy using:
+
+highest avgDeltaVsRandom
+
+tie-breaker: most “beating windows”
+
+tie-breaker: recent regime winner if regime splits enabled
+
+Acceptance
+
+Works even when no benchmark exists (returns null run id and a friendly message)
+
+Task 2 — Add a new endpoint for System Overview
+Endpoint
+
+GET /api/system/overview
+
+Response shape
+{
+  ok: true,
+  data: {
+    totalDraws,
+    modernDraws,
+    latestDrawDate,
+    bestStrategySummary: <from Task 1>
+  }
+}
+Acceptance
+
+System Overview page can load everything in one request
+
+Always includes benchmarkRunId when present
+
+Task 3 — Update System Overview frontend to use bestStrategySummary
+Where
+
+client/src/pages/system-overview.tsx (or wherever the screenshot UI lives)
+
+Replace tile logic
+
+Old tile:
+
+“Composite vs Random +0.02”
+
+New tile:
+
+Title: Best Strategy vs Random
+
+Big number: bestStrategy.avgDeltaVsRandom (formatted +0.00)
+
+Subtitle: “Avg main match delta”
+
+Small line: Strategy: <name>
+
+Optional secondary line:
+
+Runner-up: <name> (+0.xx)
+
+Acceptance
+
+The tile displays actual benchmark winner, not “Composite”
+
+If no benchmark yet, tile shows:
+
+“No benchmark run yet — run Validation to generate evidence.”
+
+Task 4 — Fix “Validation Verdict” tile to match best strategy
+Current issue
+
+Tile says “NO EDGE” while another part of UI shows a different strategy performing better.
+
+New logic
+
+Display:
+
+Overall Verdict: based on bestStrategy.stability
+
+Map stability → label color:
+
+UNDERPERFORMING → red
+
+NO EDGE → gray
+
+WEAK EDGE → amber
+
+POSSIBLE EDGE → green
+
+Subtitle should include method:
+
+“From latest benchmark (rolling/fixed)”
+
+Acceptance
+
+Verdict aligns with “Best Strategy vs Random”
+
+No more “Composite implied as best”
+
+Task 5 — Add small metadata line (prevents confusion forever)
+
+Under the tiles (small, subtle):
+
+Benchmark: <runId> • <mode> • windows: 20/40/60/100 • random runs: 500 • perm: off
+
+Acceptance
+
+Users can instantly confirm what run the overview is referencing
+
+Task 6 — Keep “Composite vs Random” as optional debug (collapsed)
+
+If you still want it, keep it hidden behind:
+
+“Show details”
+
+Then show:
+
+composite delta
+
+best strategy delta
+
+why composite is not the winner
+
+Acceptance
+
+Debug remains available
+
+Default view stays clean and non-confusing
+
+Example text for the updated tiles (copy/paste)
+Tile 3: Overall Verdict
+
+POSSIBLE EDGE
+“Best strategy from latest benchmark”
+
+Tile 4: Best Strategy vs Random
+
++0.26
+“Avg main match delta”
+“Strategy: Composite No-Frequency”
+“Runner-up: Composite Recency-Heavy (+0.24)”
+
+Implementation Notes (keep it reliable)
+
+System Overview should always reference the same benchmarkRunId as the recommendation engine.
+
+If benchmark results are persisted, pull the latest successful run from DB.
+
+If not persisted, pull from in-memory but include a “may reset on restart” note in details.
