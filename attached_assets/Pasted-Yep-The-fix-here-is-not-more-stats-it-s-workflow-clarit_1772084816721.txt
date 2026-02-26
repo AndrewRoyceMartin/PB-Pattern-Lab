@@ -1,0 +1,285 @@
+Yep. The fix here is not more stats — it’s workflow clarity + tooltips + two simple “lanes”:
+
+Composite No-Frequency (benchmark-chosen, stable)
+
+Optimised (auto-optimise → then generate)
+
+And you should never be unsure whether the optimiser affected a pick again.
+
+Below is a concrete Replit patch plan you can hand straight to your dev flow.
+
+1) Make the UI sequential and simple
+Add a new top-level page (or top panel): “Run → Picks”
+
+It should have two big buttons and almost nothing else:
+
+Lane A — Composite No-Frequency (Recommended)
+
+Button: Generate 12 Picks (Composite No-Frequency)
+Under it (small text):
+
+Uses the current validated best strategy (Composite without long-term frequency signals).
+
+No optimiser involved.
+
+Lane B — Optimised (Experimental)
+
+Button: Optimise & Generate 12 Picks (Optimised)
+Under it:
+
+Runs optimiser first, then generates.
+
+Displays the optimiser version used.
+
+✅ Key rule: The Optimised lane must run optimisation automatically before showing results.
+
+2) Guarantee “what affected this pick?” with a Run Stamp
+
+Every pick output must show a header card:
+
+“Pick Run Stamp”
+
+Strategy used: Composite No-Frequency OR Optimised Formula
+
+Benchmark run ID: (or “not used”)
+
+Optimiser: ON/OFF
+
+Optimiser run ID: (if on)
+
+Formula version/hash: (if on)
+
+Generated at: timestamp
+
+Seed: seed
+
+That instantly answers your question: did optimiser change anything?
+
+3) Make validation optional, not required
+
+Keep the Validation page for nerd mode, but for simple mode:
+
+Composite lane: can generate immediately using last known best strategy, or run auto-benchmark silently if none exists.
+
+Optimised lane: always runs optimiser first.
+
+4) Clear tooltips / mouseovers for each option (your screenshot)
+Add consistent tooltip pattern:
+
+Hover on a button or label shows:
+
+What it is
+
+When to use it
+
+What it changes
+
+Does it change picks? Yes/No
+
+Time cost (fast/medium/slow)
+
+Suggested tooltip text (copy/paste)
+
+20 / 40 / 60 / 100 draws
+
+“How many recent draws to test in each window. More draws = slower, but more stable.”
+
+Fixed Holdout
+
+“Train on older draws, test on a fixed recent block. Faster screening.”
+
+Rolling Walk-Forward
+
+“Realistic replay: train → predict next draw → add it → repeat. Best for confirmation.”
+
+Recency Verification
+
+“Quick test focused on recency strategies. Screening only.”
+
+Rolling Confirmation
+
+“Runs rolling walk-forward with strong baselines. Use before trusting a signal.”
+
+Significance Check
+
+“Runs permutation tests to see if results look unusual vs chance. Slow.”
+
+Regime Splits
+
+“Tests recent vs mid vs older periods. Helps detect era-dependent behaviour.”
+
+Permutation ON
+
+“Shuffles outcomes to estimate ‘chance’ performance. Doesn’t improve picks; validates evidence.”
+
+5) Explain “Composite No-Frequency” in plain English (simple)
+
+Use this exact definition everywhere:
+
+Composite No-Frequency = a composite scoring strategy that uses recency + trend + structure + set construction, but does not use long-term ‘most drawn’ frequency (because long-term frequency has not helped in validation).
+
+That’s it. No extra detail required.
+
+6) Make “Optimised” deterministic and safe
+New backend endpoint (recommended)
+
+Add a single endpoint so the frontend can’t mis-order calls:
+
+POST /api/auto/optimise-and-generate
+
+It does:
+
+Load latest benchmark context (optional)
+
+Run optimiser (with fixed config)
+
+Generate 12 picks using the optimiser weights
+
+Return picks + optimiser metadata + run stamp
+
+✅ This ensures you never generate picks using “old weights”.
+
+Also keep existing:
+
+POST /api/auto/generate-composite-no-frequency (simple lane A)
+
+7) Add a toggle-free “Simple Mode” and hide advanced controls
+
+On the Pick page:
+
+Show only the two lanes + results.
+
+Put all benchmark/permutation settings behind:
+
+“Advanced” accordion (collapsed by default)
+
+Or move them to Validation page only.
+
+Replit Patch Tasks (copy/paste)
+Task 1 — Add two-lane “Run → Picks” page
+
+Create a simple page/panel with:
+
+Button A: Generate 12 Picks (Composite No-Frequency)
+
+Button B: Optimise & Generate 12 Picks (Optimised)
+
+Remove/avoid extra controls on this page
+
+Add small descriptions under each button
+
+Acceptance
+
+User can generate 12 picks in one click in either lane
+
+No ambiguity which method ran
+
+Task 2 — Implement “Pick Run Stamp” header
+
+Add metadata to every generated pick response:
+
+strategyName
+
+benchmarkRunId (or null)
+
+optimiserUsed (bool)
+
+optimiserRunId (or null)
+
+formulaHash/version (or null)
+
+seed
+
+generatedAt
+
+Display as a compact card above results
+
+Acceptance
+
+After any run, user can see exactly what affected the picks
+
+Task 3 — Add POST /api/auto/optimise-and-generate
+
+Runs optimiser first (always)
+
+Then generates 12 picks using optimiser weights
+
+Returns picks + optimiser metadata + run stamp
+
+Uses fixed, simple defaults (seed=42, iterations cap, etc.)
+
+Acceptance
+
+Optimised picks always reflect the optimiser run from the same request
+
+No stale optimiser state possible
+
+Task 4 — Add POST /api/auto/generate-composite-no-frequency
+
+Generates 12 picks using Composite No-Frequency
+
+No optimiser
+
+Returns run stamp
+
+Acceptance
+
+One call produces 12 lines + run stamp
+
+Task 5 — Tooltip system for benchmark controls
+
+Add a shared Tooltip component (or use existing UI lib)
+
+Add mouseover help to each button/toggle:
+
+windows, benchmark mode, presets, regime splits, permutation, seed/runs
+
+Acceptance
+
+Hovering any control explains what it does in plain English
+
+Tooltip includes: “Does this change picks?” when relevant
+
+Task 6 — Prevent workflow confusion with sequencing rules
+
+If user presses “Optimised” lane, disable UI and show progress:
+
+Step 1: Optimising…
+
+Step 2: Generating 12 picks…
+
+Only show results after both are complete
+
+Acceptance
+
+No results appear before optimiser finishes
+
+UI clearly shows step progression
+
+Task 7 — Update generator to have “Simple/Advanced” layout
+
+Simple = two lanes + results
+
+Advanced = existing generator modes, portfolio tuning, etc.
+
+Acceptance
+
+Default experience is simple and sequential
+
+Power users can still access advanced controls
+
+What you’ll end up with (how it feels)
+
+You’ll open the pick page and see:
+
+✅ Composite No-Frequency (Recommended) → Generate 12
+✅ Optimised (Experimental) → Optimise & Generate 12
+
+And when the picks appear, you’ll see:
+
+“Optimiser: ON (run id …, formula hash …)”
+or
+
+“Optimiser: OFF”
+
+So there’s no guessing.

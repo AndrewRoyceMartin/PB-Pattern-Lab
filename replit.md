@@ -24,8 +24,12 @@ Preferred communication style: Simple, everyday language.
     - **Pattern Discovery**: Extracts frequency, structure, carryover, and rolling drift patterns.
     - **Validation**: Walk-forward backtesting (24 strategies), multi-window benchmarking with seeded random ensemble, permutation significance testing, stability classification, 3 benchmark presets, regime split testing, and config transparency (runConfigUsed echo).
     - **Generator**: Ranked picks via a handler registry (16 modes including frequency benchmarks, Bayesian-smoothed strategies, Strategy Portfolio, Structure-Matched Random, Anti-Popular Only, Diversity Optimized, and Random Baseline).
-    - **Auto Run**: One-click workflow (`POST /api/auto/generate`) that runs rolling benchmark with fixed config, selects top strategy by avg delta vs random, generates 12 game lines, and returns everything in a single response with exports (CSV lines, JSON full, CSV benchmark summary).
-    - **Formula Lab**: Weighted feature formula optimization, walk-forward replay, Monte Carlo permutation test, and overfit risk diagnostics.
+    - **Auto Run**: Three endpoints for one-click 12-line generation:
+      - `POST /api/auto/generate` — Generic: runs rolling benchmark, selects top strategy by avg delta vs random, generates 12 lines.
+      - `POST /api/auto/generate-composite-no-frequency` — Recommended lane: direct generation using Composite No-Frequency strategy (fast, no optimiser).
+      - `POST /api/auto/optimise-and-generate` — Experimental lane: runs Formula Lab optimiser fresh, generates 12 lines with jittered optimised weights.
+    - **Pick Run Stamps**: Every auto-generated result includes a `runStamp` tracking `strategyName`, `benchmarkRunId`, `optimiserUsed`, `optimiserRunId`, `formulaHash`, `seed`, and `generatedAt` for full audit trail.
+    - **Formula Lab**: Weighted feature formula optimization, walk-forward replay, Monte Carlo permutation test, and overfit risk diagnostics. `generateFormulaCard` exported for use by Auto Run optimiser lane.
 
 ### Database
 - **Database**: PostgreSQL.
@@ -74,6 +78,13 @@ Preferred communication style: Simple, everyday language.
 - **Drill-down queue**: Bookmark strategies for follow-up, add notes, persisted in localStorage, included in JSON export.
 - **Four export formats**: CSV Summary, CSV Detailed, CSV Permutation, JSON Full — all use `runConfigUsed` (not current UI state).
 - **Show Details toggle**: Persisted in localStorage; controls visibility of benchmark config, random ensemble, permutation tests, full window×strategy results, single-window validation, rolling window stability, and diagnostics.
+
+### Pick Generator UI
+- **Two-lane Simple mode**: Recommended lane (Composite No-Frequency, fast) vs Experimental lane (Optimised, runs optimiser first).
+- **Advanced mode**: Full strategy selection with 16 generator modes, custom draw-fit/anti-pop weight slider, recommendation engine integration.
+- **Run Stamp transparency**: Every generation shows strategy, seed, benchmark ID, optimiser ID, formula hash, and timestamp.
+- **Export**: CSV (12 lines) and JSON Full export for both lanes.
+- **Progress indication**: Loading spinners with step descriptions for optimiser lane.
 
 ### Key Design Decisions
 1. **Monorepo with shared types**: Ensures type safety across client and server.

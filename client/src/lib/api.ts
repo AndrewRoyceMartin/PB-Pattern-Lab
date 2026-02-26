@@ -101,6 +101,30 @@ export async function runAutoGenerate() {
   return json.data;
 }
 
+export async function runAutoCompositeNoFrequency() {
+  const res = await fetch("/api/auto/generate-composite-no-frequency", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  const json = await res.json();
+  if (!res.ok || !json.ok) {
+    throw new Error(json.message || "Composite No-Frequency generation failed");
+  }
+  return json.data;
+}
+
+export async function runAutoOptimiseAndGenerate() {
+  const res = await fetch("/api/auto/optimise-and-generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  const json = await res.json();
+  if (!res.ok || !json.ok) {
+    throw new Error(json.message || "Optimise & generate failed");
+  }
+  return json.data;
+}
+
 export async function fetchRecommendation() {
   const res = await fetch("/api/generator/recommendation");
   const json = await res.json();

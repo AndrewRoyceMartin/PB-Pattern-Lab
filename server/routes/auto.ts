@@ -1,12 +1,15 @@
 import type { Express } from "express";
 import { storage } from "../storage";
 import { apiResponse } from "./helpers";
-import type { BenchmarkRunConfig, BenchmarkStrategyStability, GeneratedPick } from "@shared/schema";
+import type { BenchmarkRunConfig, BenchmarkStrategyStability, GeneratedPick, FormulaWeights } from "@shared/schema";
 import {
   runBenchmarkValidation,
   storeBenchmarkResult,
+  scoreAntiPopularity,
 } from "../analysis";
 import { getGeneratorHandler } from "../generator-registry";
+import { runFormulaOptimizer, generateFormulaCard, generateDiverseFormulaCard } from "../formula-lab";
+import crypto from "crypto";
 
 const AUTO_BENCHMARK_CONFIG = {
   benchmarkMode: "rolling_walk_forward" as const,
@@ -31,13 +34,34 @@ const AUTO_BENCHMARK_CONFIG = {
 
 const STRATEGY_TO_GENERATOR: Record<string, { mode: string; drawFit: number; antiPop: number }> = {
   "Composite": { mode: "balanced", drawFit: 60, antiPop: 40 },
-  "Composite No-Frequency": { mode: "balanced", drawFit: 60, antiPop: 40 },
+  "Composite No-Frequency": { mode: "composite_no_frequency", drawFit: 60, antiPop: 40 },
   "Composite Recency-Heavy": { mode: "balanced", drawFit: 60, antiPop: 40 },
   "Diversity Optimized": { mode: "diversity_optimized", drawFit: 50, antiPop: 50 },
   "Recency Smoothed": { mode: "recency_smoothed", drawFit: 100, antiPop: 0 },
   "Structure-Matched Random": { mode: "structure_matched_random", drawFit: 60, antiPop: 40 },
   "Random": { mode: "random_baseline", drawFit: 0, antiPop: 0 },
 };
+
+const OPTIMISER_CONFIG = {
+  features: {
+    freqTotal: false,
+    freqL50: true,
+    freqL20: false,
+    recencySinceSeen: true,
+    trendL10: true,
+    structureFit: true,
+    carryoverAffinity: true,
+    antiPopularity: false,
+  },
+  searchIterations: 200,
+  regularizationStrength: 0.5,
+  objective: "mean_best_score" as const,
+};
+
+function hashWeights(weights: FormulaWeights): string {
+  const str = JSON.stringify(weights, Object.keys(weights).sort());
+  return crypto.createHash("md5").update(str).digest("hex").slice(0, 8);
+}
 
 function selectWinnerStrategy(stabilities: BenchmarkStrategyStability[]): {
   strategy: string;
@@ -71,6 +95,65 @@ function selectWinnerStrategy(stabilities: BenchmarkStrategyStability[]): {
     windowsBeating: best.windowsBeating,
     isFallback: false,
   };
+}
+
+function buildRunStamp(opts: {
+  strategyName: string;
+  benchmarkRunId: number | null;
+  optimiserUsed: boolean;
+  optimiserRunId: string | null;
+  formulaHash: string | null;
+  seed: number;
+}) {
+  return {
+    ...opts,
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+const CNF_FEATURES = {
+  freqTotal: false, freqL50: false, freqL20: false,
+  recencySinceSeen: true, trendL10: true, structureFit: true, carryoverAffinity: true, antiPopularity: false,
+};
+const CNF_WEIGHTS = {
+  freqTotal: 0, freqL50: 0, freqL20: 0,
+  recencySinceSeen: -0.5, trendL10: 2, structureFit: 1, carryoverAffinity: 0.5, antiPopularity: 0,
+};
+
+function mulberry32(s: number) {
+  return function () {
+    s |= 0; s = (s + 0x6D2B79F5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function generateCNFPicks(draws: any[], seed: number): GeneratedPick[] {
+  const rng = mulberry32(seed);
+  const picks: GeneratedPick[] = [];
+  const usedSets = new Set<string>();
+  const noiseSchedule = [0, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.2, 1.5];
+
+  for (let attempt = 0; attempt < 200 && picks.length < 12; attempt++) {
+    const noiseLevel = noiseSchedule[picks.length] ?? (0.3 + attempt * 0.05);
+    const { picks: mainNums, pb, formulaScore } = generateDiverseFormulaCard(draws, CNF_WEIGHTS, CNF_FEATURES, rng, noiseLevel);
+    const key = mainNums.join(",") + "|" + pb;
+    if (usedSets.has(key)) continue;
+    usedSets.add(key);
+
+    const antiPopResult = scoreAntiPopularity(mainNums, pb);
+    const drawFit = Math.round(Math.max(0, Math.min(100, formulaScore * 10)));
+
+    picks.push({
+      rank: picks.length + 1, numbers: mainNums, powerball: pb,
+      drawFit, antiPop: antiPopResult.score,
+      finalScore: Math.round(drawFit * 0.6 + antiPopResult.score * 0.4),
+      antiPopBreakdown: antiPopResult.breakdown,
+    });
+  }
+  picks.forEach((p, i) => { p.rank = i + 1; });
+  return picks;
 }
 
 export function registerAutoRoutes(app: Express): void {
@@ -107,7 +190,9 @@ export function registerAutoRoutes(app: Express): void {
         picks = handler({ draws, count: 12, allocationMethod: "validation_weighted" });
       } else {
         const generatorConfig = STRATEGY_TO_GENERATOR[winner.strategy];
-        if (generatorConfig) {
+        if (generatorConfig && generatorConfig.mode === "composite_no_frequency") {
+          picks = generateCNFPicks(draws, seed);
+        } else if (generatorConfig) {
           const handler = getGeneratorHandler(generatorConfig.mode as any);
           picks = handler({
             draws, count: 12,
@@ -133,10 +218,20 @@ export function registerAutoRoutes(app: Express): void {
           stabilityClass: s.stabilityClass,
         }));
 
+      const runStamp = buildRunStamp({
+        strategyName: winner.strategy,
+        benchmarkRunId: run.id,
+        optimiserUsed: false,
+        optimiserRunId: null,
+        formulaHash: null,
+        seed,
+      });
+
       res.json(apiResponse(draws, {
         benchmarkRunId: run.id,
         benchmarkRunTimestamp: run.createdAt,
         runConfigUsed,
+        runStamp,
         winner: {
           strategy: winner.strategy,
           reason: winner.reason,
@@ -150,6 +245,120 @@ export function registerAutoRoutes(app: Express): void {
       }));
     } catch (error: any) {
       console.error("[auto] Error:", error.message);
+      res.status(500).json({ ok: false, message: error.message });
+    }
+  });
+
+  app.post("/api/auto/generate-composite-no-frequency", async (_req, res) => {
+    try {
+      const draws = await storage.getModernDraws();
+      if (draws.length < 50) {
+        return res.status(400).json({ ok: false, message: `Only ${draws.length} modern draws available. Need at least 50 for generation.` });
+      }
+
+      console.log("[auto] Generating 12 lines using Composite No-Frequency...");
+      const seed = 42;
+      const picks = generateCNFPicks(draws, seed);
+
+      const latestRun = await storage.getLatestBenchmarkRun();
+
+      const formulaHash = hashWeights(CNF_WEIGHTS);
+      const runStamp = buildRunStamp({
+        strategyName: "Composite No-Frequency",
+        benchmarkRunId: latestRun?.id ?? null,
+        optimiserUsed: false,
+        optimiserRunId: null,
+        formulaHash,
+        seed,
+      });
+
+      res.json(apiResponse(draws, {
+        runStamp,
+        picks,
+        strategyDescription: "Composite scoring using recency + trend + structure + carryover. Frequency signals (freqTotal, freqL50, freqL20) are explicitly disabled — set to zero weight.",
+        disclaimer: "These picks are generated using historical validation metrics. They are not guaranteed to outperform chance in future draws.",
+      }));
+    } catch (error: any) {
+      console.error("[auto] CNF Error:", error.message);
+      res.status(500).json({ ok: false, message: error.message });
+    }
+  });
+
+  app.post("/api/auto/optimise-and-generate", async (_req, res) => {
+    try {
+      const draws = await storage.getModernDraws();
+      if (draws.length < 50) {
+        return res.status(400).json({ ok: false, message: `Only ${draws.length} modern draws available. Need at least 50 for optimise-and-generate.` });
+      }
+
+      console.log("[auto] Step 1: Running optimiser...");
+      const config = {
+        ...OPTIMISER_CONFIG,
+        trainingWindowSize: Math.min(200, Math.floor(draws.length * 0.7)),
+      };
+      const optimiserResult = runFormulaOptimizer(draws, config);
+      const bestWeights = optimiserResult.bestWeights;
+      const formulaHash = hashWeights(bestWeights);
+      const optimiserRunId = `opt-${Date.now()}`;
+      const seed = Date.now() % 100000;
+
+      console.log(`[auto] Step 2: Generating 12 lines with optimised weights (hash: ${formulaHash})...`);
+      const rng = mulberry32(seed);
+
+      const picks: GeneratedPick[] = [];
+      const usedSets = new Set<string>();
+
+      const optNoiseSchedule = [0, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.2, 1.5];
+      for (let attempt = 0; attempt < 200 && picks.length < 12; attempt++) {
+        const noiseLevel = optNoiseSchedule[picks.length] ?? (0.3 + attempt * 0.05);
+
+        const { picks: mainNums, pb, formulaScore } = generateDiverseFormulaCard(draws, bestWeights, OPTIMISER_CONFIG.features, rng, noiseLevel);
+        const key = mainNums.join(",") + "|" + pb;
+        if (usedSets.has(key)) continue;
+        usedSets.add(key);
+
+        const antiPopResult = scoreAntiPopularity(mainNums, pb);
+        const drawFit = Math.round(Math.max(0, Math.min(100, formulaScore * 10)));
+
+        picks.push({
+          rank: picks.length + 1,
+          numbers: mainNums,
+          powerball: pb,
+          drawFit,
+          antiPop: antiPopResult.score,
+          finalScore: Math.round(drawFit * 0.6 + antiPopResult.score * 0.4),
+          antiPopBreakdown: antiPopResult.breakdown,
+        });
+      }
+
+      picks.forEach((p, i) => { p.rank = i + 1; });
+
+      const runStamp = buildRunStamp({
+        strategyName: "Optimised Formula",
+        benchmarkRunId: null,
+        optimiserUsed: true,
+        optimiserRunId,
+        formulaHash,
+        seed,
+      });
+
+      res.json(apiResponse(draws, {
+        runStamp,
+        picks,
+        optimiserMeta: {
+          weightsUsed: bestWeights,
+          formulaHash,
+          optimiserRunId,
+          overfitRisk: optimiserResult.overfitRisk,
+          caveatedVerdict: optimiserResult.caveatedVerdict,
+          walkForwardReplay: optimiserResult.walkForwardReplay,
+          searchIterations: config.searchIterations,
+          trainingWindowSize: config.trainingWindowSize,
+        },
+        disclaimer: "These picks are generated using an auto-optimised formula. The optimiser ran fresh for this request — no stale weights. They are not guaranteed to outperform chance in future draws.",
+      }));
+    } catch (error: any) {
+      console.error("[auto] Optimise Error:", error.message);
       res.status(500).json({ ok: false, message: error.message });
     }
   });

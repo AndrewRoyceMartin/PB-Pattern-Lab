@@ -119,13 +119,15 @@ function scoreNumber(number: number, trainDraws: Draw[], weights: FormulaWeights
   return score;
 }
 
-function generateFormulaCard(trainDraws: Draw[], weights: FormulaWeights, features: FormulaFeatureConfig): { picks: number[]; pb: number } {
+export function generateFormulaCard(trainDraws: Draw[], weights: FormulaWeights, features: FormulaFeatureConfig): { picks: number[]; pb: number; formulaScore: number } {
   const scored: { number: number; score: number }[] = [];
   for (let n = 1; n <= 35; n++) {
     scored.push({ number: n, score: scoreNumber(n, trainDraws, weights, features) });
   }
   scored.sort((a, b) => b.score - a.score);
-  const picks = scored.slice(0, 7).map(s => s.number).sort((a, b) => a - b);
+  const top7 = scored.slice(0, 7);
+  const picks = top7.map(s => s.number).sort((a, b) => a - b);
+  const formulaScore = top7.reduce((sum, s) => sum + s.score, 0) / top7.length;
 
   const pbScores: { number: number; score: number }[] = [];
   const pbFreqs: Record<number, number> = {};
@@ -137,7 +139,34 @@ function generateFormulaCard(trainDraws: Draw[], weights: FormulaWeights, featur
   pbScores.sort((a, b) => b.score - a.score);
   const pb = pbScores[0]?.number ?? 1;
 
-  return { picks, pb };
+  return { picks, pb, formulaScore };
+}
+
+export function generateDiverseFormulaCard(
+  trainDraws: Draw[], weights: FormulaWeights, features: FormulaFeatureConfig, rng: () => number, noiseLevel: number = 0.5
+): { picks: number[]; pb: number; formulaScore: number } {
+  const scored: { number: number; score: number; baseScore: number }[] = [];
+  for (let n = 1; n <= 35; n++) {
+    const base = scoreNumber(n, trainDraws, weights, features);
+    const noise = (rng() - 0.5) * 2 * noiseLevel * Math.abs(base + 1);
+    scored.push({ number: n, score: base + noise, baseScore: base });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  const top7 = scored.slice(0, 7);
+  const picks = top7.map(s => s.number).sort((a, b) => a - b);
+  const formulaScore = top7.reduce((sum, s) => sum + s.baseScore, 0) / top7.length;
+
+  const pbFreqs: Record<number, number> = {};
+  const pb50 = trainDraws.slice(0, Math.min(50, trainDraws.length));
+  pb50.forEach(d => { pbFreqs[d.powerball] = (pbFreqs[d.powerball] || 0) + 1; });
+  const pbScored: { number: number; score: number }[] = [];
+  for (let n = 1; n <= 20; n++) {
+    pbScored.push({ number: n, score: (pbFreqs[n] || 0) + (rng() - 0.5) * 2 * noiseLevel });
+  }
+  pbScored.sort((a, b) => b.score - a.score);
+  const pb = pbScored[0]?.number ?? 1;
+
+  return { picks, pb, formulaScore };
 }
 
 function evaluateFormula(
