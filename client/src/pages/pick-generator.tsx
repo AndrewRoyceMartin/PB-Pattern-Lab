@@ -3,9 +3,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Zap, Play, CheckCircle, SearchX, Loader2, Info, Sparkles, AlertTriangle, ArrowRight, Shield } from "lucide-react";
+import { Zap, Play, CheckCircle, SearchX, Loader2, Info, Sparkles, AlertTriangle, ArrowRight, Shield, Rocket, Download, ChevronDown, ChevronUp, Trophy } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { generatePicks, fetchApi, fetchRecommendation } from "@/lib/api";
+import { generatePicks, fetchApi, fetchRecommendation, runAutoGenerate } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
 import type { GeneratedPick, GeneratorMode, GeneratorRecommendation } from "@shared/schema";
 
@@ -52,6 +52,117 @@ function StabilityBadge({ stabilityClass }: { stabilityClass: string }) {
   return <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-mono font-bold ${c.className}`}>{c.label}</span>;
 }
 
+interface AutoResult {
+  benchmarkRunId: number;
+  benchmarkRunTimestamp: string;
+  runConfigUsed: any;
+  winner: {
+    strategy: string;
+    reason: string;
+    avgDelta: number;
+    windowsBeating: number;
+    isFallback: boolean;
+  };
+  scoreSummary: {
+    strategy: string;
+    avgDelta: number;
+    windowsBeating: number;
+    windowsTested: number;
+    stabilityClass: string;
+  }[];
+  picks: GeneratedPick[];
+  disclaimer: string;
+}
+
+function GameLine({ pick, index }: { pick: GeneratedPick; index: number }) {
+  return (
+    <div className={`flex items-center gap-3 py-2.5 px-3 rounded-lg ${index === 0 ? 'bg-primary/5 border border-primary/20' : 'bg-card/50'}`} data-testid={`auto-game-${index + 1}`}>
+      <span className="font-mono font-bold text-muted-foreground w-16 text-sm shrink-0">Game {index + 1}</span>
+      <div className="flex gap-1.5">
+        {pick.numbers.map((n, idx) => (
+          <div key={idx} className="w-9 h-9 rounded bg-secondary flex items-center justify-center font-mono text-sm border border-border/80 shadow-sm">
+            {n.toString().padStart(2, '0')}
+          </div>
+        ))}
+        <div className="w-9 h-9 rounded bg-primary/20 text-primary border border-primary/30 flex items-center justify-center font-mono text-sm font-bold shadow-sm ml-1 relative">
+          <Zap className="w-3 h-3 absolute -top-1 -right-1 text-yellow-500" />
+          {pick.powerball.toString().padStart(2, '0')}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function exportAutoCSV(result: AutoResult) {
+  const lines = [
+    "Game,N1,N2,N3,N4,N5,N6,N7,PB",
+    ...result.picks.map((p, i) =>
+      `${i + 1},${p.numbers.join(",")},${p.powerball}`
+    ),
+    "",
+    `Strategy,${result.winner.strategy}`,
+    `Avg Delta,${result.winner.avgDelta}`,
+    `Fallback,${result.winner.isFallback}`,
+    `Benchmark Run,${result.benchmarkRunId}`,
+    `Generated,${new Date().toISOString()}`,
+  ];
+  const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `auto_12_lines_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportAutoJSON(result: AutoResult) {
+  const payload = {
+    generatedAt: new Date().toISOString(),
+    winner: result.winner,
+    runConfigUsed: result.runConfigUsed,
+    benchmarkRunId: result.benchmarkRunId,
+    scoreSummary: result.scoreSummary,
+    picks: result.picks.map((p, i) => ({
+      game: i + 1,
+      numbers: p.numbers,
+      powerball: p.powerball,
+      drawFit: p.drawFit,
+      antiPop: p.antiPop,
+      finalScore: p.finalScore,
+    })),
+    disclaimer: result.disclaimer,
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `auto_12_full_${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportBenchmarkCSV(result: AutoResult) {
+  const lines = [
+    "Strategy,Avg Delta,Windows Beating,Windows Tested,Stability",
+    ...result.scoreSummary.map(s =>
+      `${s.strategy},${s.avgDelta},${s.windowsBeating},${s.windowsTested},${s.stabilityClass}`
+    ),
+    "",
+    `Winner,${result.winner.strategy}`,
+    `Mode,${result.runConfigUsed.benchmarkMode}`,
+    `Windows,${result.runConfigUsed.windowSizes.join("/")}`,
+    `Random Runs,${result.runConfigUsed.randomBaselineRuns}`,
+    `Seed,${result.runConfigUsed.seed}`,
+  ];
+  const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `auto_benchmark_summary_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 
 export default function PickGenerator() {
   const { toast } = useToast();
@@ -59,6 +170,9 @@ export default function PickGenerator() {
   const [customAntiPop, setCustomAntiPop] = useState([40]);
   const [picks, setPicks] = useState<GeneratedPick[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isAutoRunning, setIsAutoRunning] = useState(false);
+  const [autoResult, setAutoResult] = useState<AutoResult | null>(null);
+  const [showAutoDetails, setShowAutoDetails] = useState(false);
 
   const { data: stats } = useQuery({ queryKey: ["/api/stats"], queryFn: () => fetchApi("/api/stats") });
   const { data: recommendation } = useQuery<GeneratorRecommendation>({
@@ -73,6 +187,24 @@ export default function PickGenerator() {
   const currentMode = MODES.find(m => m.value === selectedMode)!;
   const drawFitWeight = selectedMode === "balanced" ? 100 - customAntiPop[0] : currentMode.drawFit;
   const antiPopWeight = selectedMode === "balanced" ? customAntiPop[0] : currentMode.antiPop;
+
+  const handleAutoRun = async () => {
+    if (!hasData) {
+      toast({ title: "No Data", description: "Upload a dataset first.", variant: "destructive" });
+      return;
+    }
+    setIsAutoRunning(true);
+    setAutoResult(null);
+    try {
+      const result = await runAutoGenerate();
+      setAutoResult(result);
+      toast({ title: "Auto Run Complete", description: `Generated 12 lines using ${result.winner.strategy}.` });
+    } catch (error: any) {
+      toast({ title: "Auto Run Failed", description: error.message, variant: "destructive" });
+    } finally {
+      setIsAutoRunning(false);
+    }
+  };
 
   const handleGenerate = async () => {
     if (!hasData) {
@@ -123,6 +255,130 @@ export default function PickGenerator() {
           {isGenerating ? "GENERATING..." : "GENERATE (TOP 10)"}
         </Button>
       </div>
+
+      <Card className="border-primary/40 bg-gradient-to-r from-primary/5 to-primary/10" data-testid="card-auto-run">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center text-lg">
+            <Rocket className="w-5 h-5 mr-2 text-primary" />
+            Auto Run & Generate 12
+          </CardTitle>
+          <CardDescription>
+            One click: runs rolling benchmark, picks the best strategy, generates 12 game lines for a Powerball card.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col sm:flex-row gap-3 items-start">
+            <Button
+              onClick={handleAutoRun}
+              disabled={isAutoRunning || !hasData}
+              size="lg"
+              className="bg-primary hover:bg-primary/90 text-primary-foreground font-mono font-bold px-8"
+              data-testid="button-auto-run"
+            >
+              {isAutoRunning ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <Rocket className="w-5 h-5 mr-2" />}
+              {isAutoRunning ? "RUNNING BENCHMARK..." : "AUTO RUN (BEST 12)"}
+            </Button>
+            <div className="text-xs font-mono text-muted-foreground space-y-1">
+              <div>Rolling walk-forward | 500 random runs | Regime splits ON</div>
+              <div>Tests: Composite variants, Recency Smoothed, Diversity, Structure-Matched</div>
+              {isAutoRunning && <div className="text-primary animate-pulse">This may take 30-60 seconds...</div>}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {autoResult && (
+        <div className="space-y-4" data-testid="auto-results">
+          <Card className="border-green-500/30 bg-green-500/5">
+            <CardContent className="pt-6">
+              <div className="flex items-start gap-3 mb-4">
+                <Trophy className="w-6 h-6 text-green-500 shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xl font-bold font-mono" data-testid="text-auto-winner">{autoResult.winner.strategy}</span>
+                    {autoResult.winner.isFallback && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-500 font-mono font-bold">FALLBACK</span>
+                    )}
+                    {!autoResult.winner.isFallback && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/20 text-green-500 font-mono font-bold">
+                        +{autoResult.winner.avgDelta.toFixed(3)} delta
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm text-muted-foreground mt-1">{autoResult.winner.reason}</p>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                {autoResult.picks.map((pick, i) => (
+                  <GameLine key={i} pick={pick} index={i} />
+                ))}
+              </div>
+
+              <p className="text-[10px] text-muted-foreground/60 font-mono mt-4 border-t border-border/30 pt-3">
+                {autoResult.disclaimer}
+              </p>
+
+              <div className="flex flex-wrap gap-2 mt-3">
+                <Button variant="outline" size="sm" className="font-mono text-xs" onClick={() => exportAutoCSV(autoResult)} data-testid="button-export-auto-csv">
+                  <Download className="w-3 h-3 mr-1.5" /> CSV (12 Lines)
+                </Button>
+                <Button variant="outline" size="sm" className="font-mono text-xs" onClick={() => exportAutoJSON(autoResult)} data-testid="button-export-auto-json">
+                  <Download className="w-3 h-3 mr-1.5" /> JSON (Full)
+                </Button>
+                <Button variant="outline" size="sm" className="font-mono text-xs" onClick={() => exportBenchmarkCSV(autoResult)} data-testid="button-export-auto-benchmark">
+                  <Download className="w-3 h-3 mr-1.5" /> CSV (Benchmark)
+                </Button>
+              </div>
+
+              <button
+                onClick={() => setShowAutoDetails(!showAutoDetails)}
+                className="flex items-center gap-1 text-xs font-mono text-muted-foreground hover:text-foreground mt-3 transition-colors"
+                data-testid="button-toggle-auto-details"
+              >
+                {showAutoDetails ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                {showAutoDetails ? "Hide details" : "Show details"}
+              </button>
+
+              {showAutoDetails && (
+                <div className="mt-3 pt-3 border-t border-border/30 space-y-3">
+                  <div className="text-xs font-mono text-muted-foreground">
+                    <div className="font-bold text-foreground mb-2">Strategy Scores (Top 5)</div>
+                    <table className="w-full text-left">
+                      <thead>
+                        <tr className="border-b border-border/30">
+                          <th className="py-1 pr-3">Strategy</th>
+                          <th className="py-1 pr-3">Avg Delta</th>
+                          <th className="py-1 pr-3">Beating</th>
+                          <th className="py-1">Stability</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {autoResult.scoreSummary.map(s => (
+                          <tr key={s.strategy} className={`border-b border-border/10 ${s.strategy === autoResult.winner.strategy ? 'text-green-500' : ''}`}>
+                            <td className="py-1 pr-3">{s.strategy}</td>
+                            <td className="py-1 pr-3">{s.avgDelta >= 0 ? "+" : ""}{s.avgDelta.toFixed(3)}</td>
+                            <td className="py-1 pr-3">{s.windowsBeating}/{s.windowsTested}</td>
+                            <td className="py-1"><StabilityBadge stabilityClass={s.stabilityClass} /></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="flex flex-wrap gap-x-6 gap-y-1 text-[10px] font-mono text-muted-foreground/60">
+                    <span>Mode: {autoResult.runConfigUsed.benchmarkMode}</span>
+                    <span>Windows: {autoResult.runConfigUsed.windowSizes.join("/")}</span>
+                    <span>Random runs: {autoResult.runConfigUsed.randomBaselineRuns}</span>
+                    <span>Seed: {autoResult.runConfigUsed.seed}</span>
+                    <span>Regime splits: {autoResult.runConfigUsed.regimeSplits ? "ON" : "OFF"}</span>
+                    <span>Benchmark #{autoResult.benchmarkRunId}</span>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {recommendation && (
         <Card className={`border-border ${

@@ -24,6 +24,7 @@ Preferred communication style: Simple, everyday language.
     - **Pattern Discovery**: Extracts frequency, structure, carryover, and rolling drift patterns.
     - **Validation**: Walk-forward backtesting (24 strategies), multi-window benchmarking with seeded random ensemble, permutation significance testing, stability classification, 3 benchmark presets, regime split testing, and config transparency (runConfigUsed echo).
     - **Generator**: Ranked picks via a handler registry (16 modes including frequency benchmarks, Bayesian-smoothed strategies, Strategy Portfolio, Structure-Matched Random, Anti-Popular Only, Diversity Optimized, and Random Baseline).
+    - **Auto Run**: One-click workflow (`POST /api/auto/generate`) that runs rolling benchmark with fixed config, selects top strategy by avg delta vs random, generates 12 game lines, and returns everything in a single response with exports (CSV lines, JSON full, CSV benchmark summary).
     - **Formula Lab**: Weighted feature formula optimization, walk-forward replay, Monte Carlo permutation test, and overfit risk diagnostics.
 
 ### Database

@@ -1,0 +1,235 @@
+What you’ll get
+
+A one-click Auto Run → Best 12 workflow that:
+
+Runs your full benchmark suite automatically (rolling + random ensemble; permutation optional)
+
+Picks the best-performing strategy (or best portfolio) based on a single objective
+
+Generates 12 game lines for a 12-game Powerball card
+
+Outputs:
+
+the 12 combinations
+
+a short reason (“chosen because it scored best on X”)
+
+export JSON/CSV
+
+Simple objective (recommended)
+
+Since you want “best chance result”, make the objective:
+
+Maximise expected main-number matches across 12 lines
+
+Use your benchmark metric:
+
+avg delta vs random for main matches (top pack)
+
+Powerball remains secondary.
+
+Replit implementation plan (Simple Auto Mode)
+Task 1 — Add a single “Auto Run & Generate 12” button
+Where
+
+Pick Generator page (top of the page)
+
+What it does
+
+On click:
+
+Calls /api/validation/benchmark with a standard config (rolling, windows, random runs)
+
+Waits for results
+
+Selects the best strategy (or portfolio) using the objective
+
+Calls /api/generate with the selected strategy/mode and games=12
+
+Displays the 12 lines + summary + export buttons
+
+Acceptance criteria
+
+One click produces 12 valid lines
+
+Shows strategy chosen and score summary
+
+Exports include runConfigUsed + chosen strategy + generated lines
+
+Task 2 — Define the “Auto Benchmark Config” (fixed defaults)
+
+Hardcode defaults for simplicity:
+
+benchmarkMode: rolling_walk_forward
+
+windows: [20, 40, 60, 100]
+
+seed: 42
+
+randomBaselineRuns: 500
+
+runPermutation: false (keep it simple; optional later)
+
+enableRegimeSplits: true
+
+selectedStrategies: all current strategies (or a curated set)
+
+Acceptance criteria
+
+Auto benchmark always runs the same way
+
+Users don’t have to touch settings
+
+Task 3 — Strategy selection rule (simple and deterministic)
+
+After benchmark finishes:
+
+Choose the winner by:
+
+Highest Avg Delta (primary)
+
+Tie-break: highest “Beating windows” count
+
+Tie-break: best performance in recent_modern (if regime splits differ)
+
+If no strategies are positive → fallback to portfolio (diversity + anti-pop)
+
+Acceptance criteria
+
+Always selects a winner deterministically
+
+Explains why it picked it
+
+Task 4 — Generate 12 lines from the selected method
+If winner is a single strategy
+
+Call generator with:
+
+mode: winnerStrategy
+
+games: 12
+
+diversityOptimized: true (if available)
+
+If fallback portfolio is chosen
+
+Use:
+
+mode: strategy_portfolio
+
+allocation: validation_weighted
+
+games: 12
+
+Acceptance criteria
+
+Always outputs exactly 12 lines
+
+No duplicate numbers inside a line
+
+PB within range
+
+Good diversity across lines (PB spread and low overlap)
+
+Task 5 — Add “Auto Results” display (clean)
+
+Show only:
+
+Chosen method
+
+Reason (1–2 lines)
+
+12 game lines (numbered 1–12)
+
+Export buttons
+
+JSON (full: benchmark + picks)
+
+CSV (12 lines only)
+
+CSV (benchmark summary)
+
+Acceptance criteria
+
+Minimal clutter
+
+Details hidden behind “Show details”
+
+Task 6 — Add backend endpoint to run-and-return everything (optional but cleaner)
+
+Instead of the client chaining two calls, add:
+
+POST /api/auto/generate
+
+It:
+
+runs benchmark with fixed config
+
+selects winner strategy
+
+generates 12 lines
+
+returns everything in one response
+
+Acceptance criteria
+
+One API call returns:
+
+runConfigUsed
+
+winning strategy
+
+score summary
+
+generated 12 lines
+
+exports metadata
+
+This is the cleanest “simple” approach.
+
+Suggested “simple” winner shortlist (to keep runtime low)
+
+If you want it even simpler/faster, auto benchmark can run only the strategies that matter most:
+
+composite_no_frequency
+
+composite_recency_heavy
+
+composite
+
+diversity_optimized
+
+recency_smoothed
+
+random
+
+structure_matched_random
+
+That will still give you your best currently-known candidates and run faster.
+
+What the 12-line output should look like
+
+Example format:
+
+Game 1: 3, 8, 14, 19, 25, 31, 34 | PB 12
+
+Game 2: ...
+…
+
+Game 12: ...
+
+And a small note:
+
+“Selected Composite No-Frequency because it had the highest average delta vs random across 20/40/60/100 rolling windows.”
+
+One critical caveat (keep it short and correct)
+
+Add one line under results:
+
+“These picks are generated using historical validation metrics. They are not guaranteed to outperform chance in future draws.”
+
+Next question-free step
+
+Tell your Replit dev agent (or implement yourself) this single task:
+
+“Add an Auto Run & Generate 12 button that runs rolling benchmark with fixed settings, selects the top strategy by avg delta vs random, then generates 12 lines using that strategy (or validation-weighted portfolio if no positive edges), and offers export JSON/CSV.”

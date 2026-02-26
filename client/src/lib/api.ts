@@ -88,6 +88,19 @@ export async function runBenchmark(opts: BenchmarkOptions = {}) {
   return json.data;
 }
 
+export async function runAutoGenerate() {
+  const res = await fetch("/api/auto/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  const json = await res.json();
+  if (!res.ok || !json.ok) {
+    throw new Error(json.message || "Auto generate failed");
+  }
+  queryClient.invalidateQueries({ queryKey: ["/api/generator/recommendation"] });
+  return json.data;
+}
+
 export async function fetchRecommendation() {
   const res = await fetch("/api/generator/recommendation");
   const json = await res.json();
