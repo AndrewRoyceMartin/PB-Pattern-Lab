@@ -1,0 +1,184 @@
+Right now you’ve got “possible edge / weak edge” labels. The upgrade is to report:
+
+How much better than random (effect size)
+
+How confident we are it’s not just noise (uncertainty + p-value style evidence)
+
+Is it worth using (a simple “worth it” badge based on thresholds)
+
+Below is a simple, concrete plan that keeps the UI clean.
+
+1) Define “confidence” in a way you can trust
+Primary objective (keep it simple)
+
+Since you’re generating 12 lines, use a pack-level metric:
+
+Primary metric:
+✅ Δ vs Random (Avg best main matches across the pack)
+or whatever you currently use as “Avg Delta vs Random” — just make sure it is consistently defined.
+
+What “confidence” should display (minimum)
+
+For each method (CNF / Optimised / Auto winner), show:
+
+Uplift vs Random: +X% or +X delta
+
+Random baseline spread: random 5th–95th band
+
+Percentile vs Random: e.g. “Better than 78% of random runs”
+
+Permutation p-value (optional but ideal): “Not unusual / Suggestive / Supported”
+
+That’s enough to answer: “Is it statistically worth using?”
+
+2) The simplest “Worth it?” rule
+
+Add a single badge:
+
+✅ Worth trying
+
+If BOTH are true:
+
+Uplift vs random mean is positive
+
+AND the result is outside the random noise band (e.g. above random 95th percentile)
+
+🟡 Promising but not proven
+
+If:
+
+uplift is positive
+
+but inside random band (common with small effects)
+
+⚪ No edge
+
+If:
+
+uplift near zero or negative
+
+This is honest and easy to understand.
+
+3) Where the numbers come from (and why they’re credible)
+Random ensemble (already in your app)
+
+You already run 500 random runs in the benchmark. Great.
+
+From those 500, compute:
+
+randomMean
+
+randomStd
+
+randomP05, randomP95
+
+percentile of your method within the random distribution
+
+That gives “how much better than random” in a defensible way.
+
+Permutation test (your “Significance Check”)
+
+This is your “is it likely chance?” check:
+
+show empirical p-value and a badge:
+
+Supported (p ≤ 0.05)
+
+Suggestive (0.05 < p ≤ 0.20)
+
+Unsupported (p > 0.20)
+
+Given what we’ve seen so far, you’ll often be in Suggestive/Unsupported, which is fine — it keeps you from fooling yourself.
+
+4) Apply this directly to the Pick Generator (simple UI)
+
+On the Pick Generator results page, show a Confidence Panel like:
+
+Confidence Panel
+
+Method: Composite No-Frequency
+
+Uplift vs random: +0.26 (avg delta)
+
+Percentile vs random: 78th percentile
+
+Random band: [p05, p95]
+
+Stat verdict: Promising but not proven
+
+Evidence used: Rolling walk-forward benchmark (windows 20/40/60/100), random runs 500, seed 42
+
+And for Optimised:
+
+same panel, but reference the optimiser replay/benchmark it used.
+
+This makes it crystal clear whether you’re getting anything above chance.
+
+5) Make Optimised “confidence” comparable to CNF
+
+Right now, CNF and Optimised “drawFit” are on different scales (as you noticed). Fix that by normalising:
+
+Normalisation rule (simple)
+
+During generation, you already score candidates. Use that distribution to map formulaScore to 0–100:
+
+drawFit = 100 * (score - min) / (max - min)
+
+Then both lanes report drawFit on the same scale.
+
+6) One-click “Run Evidence” from Pick Generator (keep it simple)
+
+You’ve already got two lanes. Add one more small button under each:
+
+“Update Evidence” (runs the rolling benchmark preset in the background)
+
+Updates the confidence panel numbers
+
+Doesn’t change your generated 12 lines unless you click generate again
+
+That keeps the workflow sequential:
+
+Evidence updated (optional)
+
+Generate picks
+
+Confidence shown
+
+Replit patch tasks (copy/paste)
+Task A — Add Confidence Panel to Pick Generator results
+
+Show uplift vs random, percentile, random band
+
+Show which evidence source was used (benchmarkRunId or optimiser replay)
+
+Add “Worth it?” badge rules
+
+Task B — Standardise metric naming
+
+Define one primary metric name used everywhere:
+
+deltaVsRandomMean
+
+percentileVsRandom
+
+randomP05, randomP95
+
+Task C — Ensure both lanes output comparable confidence
+
+Normalise drawFit to 0–100 in CNF and Optimised
+
+Store raw score + normalised score in run stamp metadata
+
+Task D — Add optional permutation badge (if available)
+
+If permutation results exist for the chosen method:
+
+show p-value badge
+
+Else show “Not tested”
+
+Task E — Add “Update Evidence” button (optional)
+
+Runs rolling confirmation preset
+
+Stores benchmarkRunId used for confidence panel
