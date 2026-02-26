@@ -1,0 +1,202 @@
+Next Step (what we should do now)
+Goal
+
+Bring the Validation page up to parity with your benchmark engine so that:
+
+the UI always sends the full benchmark config (mode, permutation, random runs, etc.)
+
+the backend echoes runConfigUsed
+
+the UI shows Mode Used and warns on mismatch
+
+exports always export the run result, not current UI state
+
+This is exactly the “full patch” we drafted — now we apply it to your current code.
+
+Replit Implementation Plan – Phase 1 (Frontend parity + mismatch guardrails)
+Task 1 — Upgrade runBenchmark() API wrapper to accept full config
+
+Files
+
+client/src/lib/api.ts (or wherever runBenchmark lives)
+
+Change
+Replace:
+
+runBenchmark(selectedWindows, minTrainDraws)
+
+With:
+
+runBenchmark(config: ValidationBenchmarkConfig)
+
+Payload should include
+
+windows
+
+benchmarkMode
+
+seed
+
+randomBaselineRuns
+
+runPermutation
+
+permutationRuns
+
+enableRegimeSplits
+
+selectedStrategies
+
+preset
+
+Acceptance
+
+Network request body matches UI controls exactly (log it)
+
+No defaults applied client-side except initial config
+
+Task 2 — Refactor Validation page to single-source-of-truth config
+
+File
+
+client/src/pages/validation.tsx
+
+Change
+Replace selectedWindows + benchmark + misc flags with a single config object:
+
+benchmarkConfig state containing:
+
+windows
+
+mode
+
+regimeSplits
+
+seed
+
+randomRuns
+
+permutation ON/OFF
+
+permutationRuns
+
+preset
+
+Acceptance
+
+All UI controls read/write benchmarkConfig
+
+No separate state for mode or permutation flags
+
+Task 3 — Presets must set mode/permutation correctly (atomic updates)
+
+Your “Significance Check” preset must force:
+
+benchmarkMode = rolling_walk_forward
+
+runPermutation = true
+
+permutationRuns = 1000
+
+shortlist strategies only
+
+Acceptance
+
+Clicking preset instantly updates all controls to correct values
+
+Running benchmark right after preset uses those values
+
+Task 4 — Display “Run Configuration Used” (from backend) above results
+
+Add a results header card
+
+Preset used
+
+Mode used
+
+Windows tested
+
+Seed
+
+Random runs
+
+Permutation on/off + runs
+
+Regime splits on/off
+
+benchmarkRunId + timestamp
+
+Acceptance
+
+You can always verify what actually ran without looking at exports
+
+Task 5 — Add mismatch warning (UI ≠ runConfigUsed)
+
+If user changes controls after running:
+
+show warning banner:
+
+“Current UI settings differ from the benchmark run shown below…”
+
+Acceptance
+
+Prevents accidental misinterpretation and wrong exports
+
+Task 6 — Export must export the last result payload, not current UI state
+
+Your current CSV export is built from the benchmark object (good), but it does not include the run config metadata and it can’t export JSON.
+
+Add export buttons:
+
+Export Summary CSV
+
+Export Detailed CSV
+
+Export Full JSON (raw benchmark result)
+
+Acceptance
+
+Export filenames include run id + timestamp
+
+Exports include runConfigUsed
+
+Replit Implementation Plan – Phase 2 (Backend echo + safety)
+Task 7 — Ensure /api/validation/benchmark returns runConfigUsed
+
+Backend must echo the normalized config it actually used.
+
+Acceptance
+
+Response always contains:
+
+runConfigUsed.benchmarkMode
+
+runConfigUsed.runPermutation
+
+runConfigUsed.permutationRuns
+
+etc.
+
+Task 8 — Add server log (dev only)
+
+Log:
+
+preset
+
+mode
+
+seed
+
+random runs
+
+permutation runs
+
+strategies count
+
+Acceptance
+
+One-line log per benchmark run confirms execution
+
+Why this is the right “next step”
+
+Right now, the UI file I can see is still wired to the old simplified benchmark call. That will always produce confusion when you’re trying to do serious rolling/permutation runs. Fixing this makes everything else reliable and speeds up iteration
