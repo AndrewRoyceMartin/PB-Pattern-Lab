@@ -80,6 +80,28 @@ function formatDelta(d: number): string {
   return d >= 0 ? `+${d.toFixed(2)}` : d.toFixed(2);
 }
 
+function explainDelta(delta: number, windowsBeating: number, windowsTested: number): string {
+  if (delta <= 0) {
+    return "This strategy did not outperform random picks. No measurable edge detected.";
+  }
+
+  const per100 = Math.round(delta * 100);
+  const consistency = windowsBeating === windowsTested
+    ? "consistently across all test windows"
+    : `in ${windowsBeating} of ${windowsTested} test windows`;
+
+  if (delta < 0.05) {
+    return `Averages ~${per100} extra match per 100 draws vs random — essentially no meaningful difference. The edge is within noise range.`;
+  }
+  if (delta < 0.15) {
+    return `Averages ~${per100} extra matches per 100 draws vs random ${consistency}. A small signal, but hard to distinguish from luck.`;
+  }
+  if (delta < 0.3) {
+    return `Averages ~${per100} extra matches per 100 draws vs random ${consistency}. A modest signal — roughly 1 extra match every ${Math.round(100 / delta)} draws compared to picking randomly.`;
+  }
+  return `Averages ~${per100} extra matches per 100 draws vs random ${consistency}. A notable signal — roughly 1 extra match every ${Math.round(100 / delta)} draws compared to picking randomly.`;
+}
+
 export default function Dashboard() {
   const { data: overview } = useQuery<OverviewData>({
     queryKey: ["/api/system/overview"],
@@ -167,10 +189,12 @@ export default function Dashboard() {
                 <div className="text-2xl font-bold font-mono" data-testid="text-best-delta">
                   {formatDelta(best.avgDeltaVsRandom)}
                 </div>
-                <p className="text-xs text-muted-foreground mt-1 font-mono">Avg main match delta</p>
-                <p className="text-xs text-primary mt-0.5 font-mono">{best.name}</p>
+                <p className="text-xs text-muted-foreground mt-1 font-mono">{best.name}</p>
+                <p className="text-xs text-muted-foreground/80 mt-1.5 leading-relaxed">
+                  {explainDelta(best.avgDeltaVsRandom, best.windowsBeating, best.windowsTested)}
+                </p>
                 {bench?.runnerUp && (
-                  <p className="text-xs text-muted-foreground/70 mt-0.5 font-mono">
+                  <p className="text-xs text-muted-foreground/60 mt-1 font-mono">
                     Runner-up: {bench.runnerUp.name} ({formatDelta(bench.runnerUp.avgDeltaVsRandom)})
                   </p>
                 )}
