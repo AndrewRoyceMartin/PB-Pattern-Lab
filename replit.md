@@ -1,7 +1,7 @@
 # Powerball Pattern Lab
 
 ## Overview
-Powerball Pattern Lab is a full-stack web application for analyzing the Australian Powerball lottery. It allows users to import historical draw data, discover statistical patterns (frequency, recency, structure, carryover), validate these patterns via walk-forward backtesting, and generate ranked number picks. The core principle is a "benchmark-first" approach, validating pattern strategies against seeded random ensemble baselines with permutation significance testing and anti-popularity scoring to ensure practical utility and avoid look-ahead bias.
+Powerball Pattern Lab is a full-stack web application for analyzing the Australian Powerball lottery. It allows users to import historical draw data (via CSV upload or RSS feed sync), discover statistical patterns (frequency, recency, structure, carryover), validate these patterns via walk-forward backtesting, and generate ranked number picks. The core principle is a "benchmark-first" approach, validating pattern strategies against seeded random ensemble baselines with permutation significance testing and anti-popularity scoring to ensure practical utility and avoid look-ahead bias.
 
 ## User Preferences
 Preferred communication style: Simple, everyday language.
@@ -101,6 +101,7 @@ Preferred communication style: Simple, everyday language.
 12. **Config transparency**: Backend echoes `runConfigUsed` in responses; exports use result payload not current UI state.
 13. **Atomic preset application**: Presets override mode/permutation/regime atomically; manual changes clear preset indicator.
 14. **Data-driven System Overview**: Dashboard tiles reflect actual benchmark winner (Best Strategy vs Random), not hardcoded Composite. Verdict, delta, runner-up, and benchmark metadata all pulled from `GET /api/system/overview` which reads latest persisted benchmark run.
+15. **RSS feed sync**: `POST /api/rss-sync` fetches latest AU Powerball draws from Lottolyzer RSS feed, parses ball images from HTML descriptions, deduplicates by draw number, and inserts new draws. Supplements CSV bulk import for keeping data current.
 
 ## External Dependencies
 

@@ -3,6 +3,7 @@ import multer from "multer";
 import { parse as csvParse } from "csv-parse/sync";
 import { storage } from "../storage";
 import { apiResponse } from "./helpers";
+import type { InsertDraw } from "@shared/schema";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
@@ -115,6 +116,62 @@ export function registerUploadRoutes(app: Express): void {
       res.status(500).json({ ok: false, message: error.message });
     }
   });
+
+  app.post("/api/rss-sync", async (_req, res) => {
+    try {
+      const RSS_URL = "https://en.lottolyzer.com/public/rss/2.0/lottolyzer.news.xml";
+      const response = await fetch(RSS_URL, { signal: AbortSignal.timeout(15000) });
+      if (!response.ok) {
+        return res.status(502).json({ ok: false, message: `RSS feed returned ${response.status}` });
+      }
+      const xml = await response.text();
+
+      const auPbDraws = parseRSSForAUPowerball(xml);
+
+      if (auPbDraws.length === 0) {
+        return res.json({
+          ok: true,
+          meta: { drawsUsed: 0, modernFormatOnly: true, generatedAt: new Date().toISOString() },
+          data: { synced: 0, skipped: 0, draws: [], message: "No AU Powerball draws found in RSS feed." },
+        });
+      }
+
+      let synced = 0;
+      let skipped = 0;
+      const syncedDraws: InsertDraw[] = [];
+
+      for (const draw of auPbDraws) {
+        const existing = await storage.getDrawByNumber(draw.drawNumber);
+        if (existing) {
+          skipped++;
+          continue;
+        }
+        syncedDraws.push(draw);
+      }
+
+      let inserted: any[] = [];
+      if (syncedDraws.length > 0) {
+        inserted = await storage.insertDraws(syncedDraws);
+        synced = inserted.length;
+      }
+
+      res.json({
+        ok: true,
+        meta: { drawsUsed: synced, modernFormatOnly: true, generatedAt: new Date().toISOString() },
+        data: {
+          synced,
+          skipped,
+          draws: auPbDraws.map(d => ({ drawNumber: d.drawNumber, drawDate: d.drawDate, numbers: d.numbers, powerball: d.powerball })),
+          message: synced > 0
+            ? `Synced ${synced} new draw(s) from RSS feed.`
+            : `All ${skipped} draw(s) from RSS already in database.`,
+        },
+      });
+    } catch (error: any) {
+      console.error("RSS sync error:", error);
+      res.status(500).json({ ok: false, message: "RSS sync failed: " + error.message });
+    }
+  });
 }
 
 function parseCSVRow(headers: string[], cols: string[]): any | null {
@@ -191,4 +248,91 @@ function parseCSVRow(headers: string[], cols: string[]): any | null {
   } catch {
     return null;
   }
+}
+
+function parseRSSForAUPowerball(xml: string): InsertDraw[] {
+  const results: InsertDraw[] = [];
+
+  const itemRegex = /<item>([\s\S]*?)<\/item>/g;
+  let match;
+  while ((match = itemRegex.exec(xml)) !== null) {
+    const item = match[1];
+
+    const titleMatch = item.match(/<title>([^<]*)<\/title>/);
+    if (!titleMatch) continue;
+    const title = titleMatch[1];
+
+    const auPbMatch = title.match(/^Powerball Draw (\d+)$/);
+    if (!auPbMatch) continue;
+
+    const drawNumber = parseInt(auPbMatch[1]);
+
+    const descMatch = item.match(/<description><!\[CDATA\[([\s\S]*?)\]\]><\/description>/);
+    if (!descMatch) continue;
+    const desc = descMatch[1];
+
+    const dateMatch = desc.match(/Powerball Draw \d+ (\d{1,2} \w+ \d{4})/);
+    let drawDate = "unknown";
+    if (dateMatch) {
+      const parts = dateMatch[1].split(" ");
+      if (parts.length === 3) {
+        const day = parts[0].padStart(2, "0");
+        const monthMap: Record<string, string> = {
+          Jan: "01", Feb: "02", Mar: "03", Apr: "04", May: "05", Jun: "06",
+          Jul: "07", Aug: "08", Sep: "09", Oct: "10", Nov: "11", Dec: "12",
+        };
+        const month = monthMap[parts[1]] || "01";
+        drawDate = `${day}/${month}/${parts[2]}`;
+      }
+    }
+
+    const ballRegex = /ball(\d+)\.gif/g;
+    const allBalls: number[] = [];
+    let ballMatch;
+    while ((ballMatch = ballRegex.exec(desc)) !== null) {
+      allBalls.push(parseInt(ballMatch[1]));
+    }
+
+    const hasPlusSeparator = desc.includes("plus.gif");
+
+    let mainNumbers: number[] = [];
+    let powerball = 0;
+
+    if (hasPlusSeparator) {
+      const plusIdx = desc.indexOf("plus.gif");
+      const beforePlus = desc.substring(0, plusIdx);
+      const afterPlus = desc.substring(plusIdx);
+
+      const beforeBalls: number[] = [];
+      const afterBalls: number[] = [];
+
+      const bRegex = /ball(\d+)\.gif/g;
+      let bm;
+      while ((bm = bRegex.exec(beforePlus)) !== null) beforeBalls.push(parseInt(bm[1]));
+      bRegex.lastIndex = 0;
+      while ((bm = bRegex.exec(afterPlus)) !== null) afterBalls.push(parseInt(bm[1]));
+
+      mainNumbers = beforeBalls;
+      powerball = afterBalls.length > 0 ? afterBalls[afterBalls.length - 1] : 0;
+    } else if (allBalls.length >= 8) {
+      mainNumbers = allBalls.slice(0, 7);
+      powerball = allBalls[7];
+    } else {
+      continue;
+    }
+
+    if (mainNumbers.length !== 7 || powerball === 0) continue;
+
+    const isModern = mainNumbers.every(n => n >= 1 && n <= 35) && powerball >= 1 && powerball <= 20;
+
+    results.push({
+      drawNumber,
+      drawDate,
+      numbers: mainNumbers.sort((a, b) => a - b),
+      powerball,
+      isModernFormat: isModern,
+    });
+  }
+
+  return results;
 }

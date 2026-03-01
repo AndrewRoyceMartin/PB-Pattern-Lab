@@ -1,9 +1,9 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { UploadCloud, FileType, CheckCircle, Clock, Loader2, Trash2 } from "lucide-react";
+import { UploadCloud, FileType, CheckCircle, Clock, Loader2, Trash2, Rss, RefreshCw } from "lucide-react";
 import { useRef, useState } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { uploadCSV, resetData } from "@/lib/api";
+import { uploadCSV, resetData, syncRSS } from "@/lib/api";
 import { fetchApi } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
 
@@ -12,8 +12,10 @@ export default function Ingest() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   const [uploadResult, setUploadResult] = useState<any>(null);
+  const [rssResult, setRssResult] = useState<any>(null);
 
   const { data: stats, refetch: refetchStats } = useQuery({ queryKey: ["/api/stats"], queryFn: () => fetchApi("/api/stats") });
   const hasData = stats?.totalDraws > 0;
@@ -62,6 +64,24 @@ export default function Ingest() {
     }
   };
 
+  const handleRSSSync = async () => {
+    setIsSyncing(true);
+    setRssResult(null);
+    try {
+      const result = await syncRSS();
+      setRssResult(result);
+      await refetchStats();
+      toast({
+        title: result.synced > 0 ? "RSS sync complete" : "Already up to date",
+        description: result.message,
+      });
+    } catch (error: any) {
+      toast({ title: "RSS sync failed", description: error.message, variant: "destructive" });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const pipelineOk = hasData || !!uploadResult;
 
   return (
@@ -89,6 +109,56 @@ export default function Ingest() {
             <FileType className="w-4 h-4 mr-2" />
             {isUploading ? "Uploading..." : "Select File"}
           </Button>
+        </CardContent>
+      </Card>
+
+      <Card className="border-border bg-card">
+        <CardHeader className="pb-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-orange-500/10 flex items-center justify-center">
+              <Rss className="w-5 h-5 text-orange-500" />
+            </div>
+            <div>
+              <CardTitle className="text-base">RSS Feed Sync</CardTitle>
+              <CardDescription className="text-xs font-mono">
+                Fetch latest AU Powerball draws from Lottolyzer RSS feed
+              </CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Pulls the most recent draw results from the public RSS feed and adds any new draws not already in your database. Use this to keep your dataset current after the initial CSV import.
+          </p>
+          <div className="flex items-center gap-3">
+            <Button
+              variant="outline"
+              onClick={handleRSSSync}
+              disabled={isSyncing}
+              data-testid="button-rss-sync"
+            >
+              {isSyncing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />}
+              {isSyncing ? "Syncing..." : "Sync from RSS"}
+            </Button>
+            {rssResult && (
+              <span className={`text-xs font-mono ${rssResult.synced > 0 ? "text-green-500" : "text-muted-foreground"}`} data-testid="text-rss-result">
+                {rssResult.message}
+              </span>
+            )}
+          </div>
+          {rssResult?.draws?.length > 0 && (
+            <div className="space-y-1 border-t border-border/50 pt-2">
+              <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Draws found in feed</span>
+              {rssResult.draws.map((d: any) => (
+                <div key={d.drawNumber} className="flex items-center gap-2 text-xs font-mono bg-secondary/30 rounded px-3 py-1.5" data-testid={`rss-draw-${d.drawNumber}`}>
+                  <span className="text-foreground/70">#{d.drawNumber}</span>
+                  <span className="text-muted-foreground">{d.drawDate}</span>
+                  <span className="text-primary">{d.numbers.map((n: number) => n.toString().padStart(2, '0')).join(' ')}</span>
+                  <span className="text-yellow-500">PB {d.powerball.toString().padStart(2, '0')}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
 

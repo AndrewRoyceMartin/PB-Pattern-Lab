@@ -125,6 +125,22 @@ export async function runAutoOptimiseAndGenerate() {
   return json.data;
 }
 
+export async function syncRSS() {
+  const res = await fetch("/api/rss-sync", { method: "POST" });
+  const json = await res.json();
+  if (!res.ok || !json.ok) {
+    throw new Error(json.message || "RSS sync failed");
+  }
+  queryClient.invalidateQueries({ queryKey: ["/api/draws"] });
+  queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
+  queryClient.invalidateQueries({ queryKey: ["/api/analysis/frequencies"] });
+  queryClient.invalidateQueries({ queryKey: ["/api/analysis/features"] });
+  queryClient.invalidateQueries({ queryKey: ["/api/analysis/audit"] });
+  queryClient.invalidateQueries({ queryKey: ["/api/analysis/validation"] });
+  queryClient.invalidateQueries({ queryKey: ["/api/analysis/structure-profile"] });
+  return json.data;
+}
+
 export async function fetchRecommendation() {
   const res = await fetch("/api/generator/recommendation");
   const json = await res.json();

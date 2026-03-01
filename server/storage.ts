@@ -11,6 +11,7 @@ export interface IStorage {
   getAllDraws(): Promise<Draw[]>;
   getModernDraws(): Promise<Draw[]>;
   getDrawCount(): Promise<number>;
+  getDrawByNumber(drawNumber: number): Promise<Draw | null>;
   clearDraws(): Promise<void>;
   saveBenchmarkRun(config: BenchmarkRunConfig, summary: BenchmarkSummary): Promise<BenchmarkRun>;
   getLatestBenchmarkRun(): Promise<BenchmarkRun | null>;
@@ -36,6 +37,11 @@ export class DatabaseStorage implements IStorage {
   async getDrawCount(): Promise<number> {
     const result = await db.select({ count: sql<number>`count(*)` }).from(draws);
     return Number(result[0].count);
+  }
+
+  async getDrawByNumber(drawNumber: number): Promise<Draw | null> {
+    const rows = await db.select().from(draws).where(eq(draws.drawNumber, drawNumber)).limit(1);
+    return rows[0] ?? null;
   }
 
   async clearDraws(): Promise<void> {
