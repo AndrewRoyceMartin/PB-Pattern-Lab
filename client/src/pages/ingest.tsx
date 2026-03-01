@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { UploadCloud, FileType, CheckCircle, Clock, Loader2, Trash2, Rss, RefreshCw } from "lucide-react";
 import { useRef, useState } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { uploadCSV, resetData, syncRSS } from "@/lib/api";
+import { uploadCSV, resetData, syncRSS, syncRSSAll } from "@/lib/api";
 import { fetchApi } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
 
@@ -13,9 +13,11 @@ export default function Ingest() {
   const [isUploading, setIsUploading] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isSyncingAll, setIsSyncingAll] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   const [uploadResult, setUploadResult] = useState<any>(null);
   const [rssResult, setRssResult] = useState<any>(null);
+  const [fullSyncResult, setFullSyncResult] = useState<any>(null);
 
   const { data: stats, refetch: refetchStats } = useQuery({ queryKey: ["/api/stats"], queryFn: () => fetchApi("/api/stats") });
   const hasData = stats?.totalDraws > 0;
@@ -61,6 +63,24 @@ export default function Ingest() {
       toast({ title: "Reset failed", description: error.message, variant: "destructive" });
     } finally {
       setIsResetting(false);
+    }
+  };
+
+  const handleFullSync = async () => {
+    setIsSyncingAll(true);
+    setFullSyncResult(null);
+    try {
+      const result = await syncRSSAll();
+      setFullSyncResult(result);
+      await refetchStats();
+      toast({
+        title: result.synced > 0 ? "Full import complete" : "Already up to date",
+        description: result.message,
+      });
+    } catch (error: any) {
+      toast({ title: "Full import failed", description: error.message, variant: "destructive" });
+    } finally {
+      setIsSyncingAll(false);
     }
   };
 
@@ -128,25 +148,46 @@ export default function Ingest() {
         </CardHeader>
         <CardContent className="space-y-3">
           <p className="text-xs text-muted-foreground">
-            Pulls the most recent draw results from the public RSS feed and adds any new draws not already in your database. Use this to keep your dataset current after the initial CSV import.
+            Import all AU Powerball draws from Lottolyzer, or sync just the latest. Full import fetches draws #877 onwards (takes 1-2 minutes on first run). Duplicates are automatically skipped.
           </p>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              onClick={handleFullSync}
+              disabled={isSyncingAll || isSyncing}
+              data-testid="button-full-sync"
+            >
+              {isSyncingAll ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Rss className="w-4 h-4 mr-2" />}
+              {isSyncingAll ? "Importing all draws..." : "Import All Draws"}
+            </Button>
             <Button
               variant="outline"
               onClick={handleRSSSync}
-              disabled={isSyncing}
+              disabled={isSyncing || isSyncingAll}
               data-testid="button-rss-sync"
             >
               {isSyncing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />}
-              {isSyncing ? "Syncing..." : "Sync from RSS"}
+              {isSyncing ? "Syncing..." : "Sync Latest Only"}
             </Button>
-            {rssResult && (
-              <span className={`text-xs font-mono ${rssResult.synced > 0 ? "text-green-500" : "text-muted-foreground"}`} data-testid="text-rss-result">
-                {rssResult.message}
-              </span>
-            )}
           </div>
-          {rssResult?.draws?.length > 0 && (
+          {isSyncingAll && (
+            <div className="text-xs font-mono text-muted-foreground/70 animate-pulse">
+              Fetching draws from Lottolyzer... this may take 1-2 minutes.
+            </div>
+          )}
+          {fullSyncResult && (
+            <div className={`text-xs font-mono p-3 rounded border ${fullSyncResult.synced > 0 ? "text-green-400 border-green-500/30 bg-green-500/5" : "text-muted-foreground border-border/50 bg-secondary/10"}`} data-testid="text-full-sync-result">
+              <div>{fullSyncResult.message}</div>
+              {fullSyncResult.drawRange && (
+                <div className="text-muted-foreground/60 mt-1">Range: Draw #{fullSyncResult.drawRange.first} — #{fullSyncResult.drawRange.last}</div>
+              )}
+            </div>
+          )}
+          {rssResult && !fullSyncResult && (
+            <div className={`text-xs font-mono ${rssResult.synced > 0 ? "text-green-500" : "text-muted-foreground"}`} data-testid="text-rss-result">
+              {rssResult.message}
+            </div>
+          )}
+          {rssResult?.draws?.length > 0 && !fullSyncResult && (
             <div className="space-y-1 border-t border-border/50 pt-2">
               <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Draws found in feed</span>
               {rssResult.draws.map((d: any) => (

@@ -172,6 +172,144 @@ export function registerUploadRoutes(app: Express): void {
       res.status(500).json({ ok: false, message: "RSS sync failed: " + error.message });
     }
   });
+
+  app.post("/api/rss-sync-all", async (_req, res) => {
+    try {
+      const FIRST_DRAW = 877;
+      const RESULT_URL = "https://en.lottolyzer.com/result/australia/powerball/draw";
+
+      const latestResp = await fetch("https://en.lottolyzer.com/home/australia/powerball/summary-view/draw/9999", { signal: AbortSignal.timeout(15000) });
+      const latestHtml = await latestResp.text();
+      const latestMatch = latestHtml.match(/<span id="latest_draw">Draw (\d+)<\/span>/);
+      const latestDraw = latestMatch ? parseInt(latestMatch[1]) : 1554;
+
+      console.log(`[rss-sync-all] Fetching draws ${FIRST_DRAW} to ${latestDraw} from Lottolyzer...`);
+
+      let synced = 0;
+      let skipped = 0;
+      let failed = 0;
+      let alreadyExist = 0;
+      const batchSize = 10;
+      const delayMs = 300;
+
+      for (let batchStart = FIRST_DRAW; batchStart <= latestDraw; batchStart += batchSize) {
+        const batchEnd = Math.min(batchStart + batchSize - 1, latestDraw);
+        const promises: Promise<InsertDraw | null>[] = [];
+
+        for (let drawNum = batchStart; drawNum <= batchEnd; drawNum++) {
+          const existing = await storage.getDrawByNumber(drawNum);
+          if (existing) {
+            alreadyExist++;
+            continue;
+          }
+
+          promises.push(
+            fetchDrawPage(RESULT_URL, drawNum).catch(err => {
+              console.error(`[rss-sync-all] Failed draw ${drawNum}: ${err.message}`);
+              return null;
+            })
+          );
+        }
+
+        if (promises.length > 0) {
+          const results = await Promise.all(promises);
+          const validDraws = results.filter((d): d is InsertDraw => d !== null);
+
+          if (validDraws.length > 0) {
+            await storage.insertDraws(validDraws);
+            synced += validDraws.length;
+          }
+          failed += results.filter(d => d === null).length;
+        }
+
+        if (batchStart + batchSize <= latestDraw) {
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+        }
+
+        if ((batchStart - FIRST_DRAW) % 100 === 0 && batchStart > FIRST_DRAW) {
+          console.log(`[rss-sync-all] Progress: ${batchStart - FIRST_DRAW}/${latestDraw - FIRST_DRAW} checked, ${synced} synced, ${alreadyExist} existing`);
+        }
+      }
+
+      console.log(`[rss-sync-all] Done: ${synced} synced, ${alreadyExist} existing, ${failed} failed`);
+
+      res.json({
+        ok: true,
+        meta: { drawsUsed: synced, modernFormatOnly: true, generatedAt: new Date().toISOString() },
+        data: {
+          synced,
+          skipped: alreadyExist,
+          failed,
+          drawRange: { first: FIRST_DRAW, last: latestDraw },
+          message: synced > 0
+            ? `Synced ${synced} new draw(s) from Lottolyzer (${alreadyExist} already existed, ${failed} failed).`
+            : `All ${alreadyExist} draw(s) already in database (${failed} not available on Lottolyzer).`,
+        },
+      });
+    } catch (error: any) {
+      console.error("RSS sync-all error:", error);
+      res.status(500).json({ ok: false, message: "Full sync failed: " + error.message });
+    }
+  });
+}
+
+async function fetchDrawPage(baseUrl: string, drawNum: number): Promise<InsertDraw | null> {
+  const url = `${baseUrl}/${drawNum}`;
+  const resp = await fetch(url, { signal: AbortSignal.timeout(10000) });
+  if (!resp.ok) return null;
+  const html = await resp.text();
+
+  const titleMatch = html.match(/<title>.*Draw (\d+) Result<\/title>/);
+  if (!titleMatch) return null;
+
+  let drawDate = "unknown";
+  const dateMatch = html.match(/class="[^"]*date[^"]*nopad">\s*([^<]+)/);
+  if (dateMatch) {
+    const raw = dateMatch[1].trim().replace(/(\d+)(st|nd|rd|th)/, "$1");
+    const parts = raw.split(" ");
+    if (parts.length === 3) {
+      const day = parts[0].padStart(2, "0");
+      const monthMap: Record<string, string> = {
+        January: "01", February: "02", March: "03", April: "04", May: "05", June: "06",
+        July: "07", August: "08", September: "09", October: "10", November: "11", December: "12",
+      };
+      const month = monthMap[parts[1]] || "01";
+      drawDate = `${day}/${month}/${parts[2]}`;
+    }
+  }
+
+  const winSection = html.match(/class="[^"]*win[^"]*nopad">([\s\S]*?)(?:<\/div>\s*<\/div>\s*<\/div>)/);
+  const suppSection = html.match(/class="[^"]*supp[^"]*nopad">([\s\S]*?)(?:<\/div>\s*<\/div>)/);
+
+  if (!winSection || !suppSection) return null;
+
+  const mainBalls: number[] = [];
+  const mainRegex = /<img class="ball"[^>]*alt="(\d+)"/g;
+  let m;
+  while ((m = mainRegex.exec(winSection[1])) !== null) {
+    mainBalls.push(parseInt(m[1]));
+  }
+
+  const pbBalls: number[] = [];
+  const pbRegex = /<img class="ball"[^>]*alt="(\d+)"/g;
+  while ((m = pbRegex.exec(suppSection[1])) !== null) {
+    pbBalls.push(parseInt(m[1]));
+  }
+
+  if (mainBalls.length < 6 || mainBalls.length > 7 || pbBalls.length === 0) return null;
+
+  const mainNumbers = mainBalls.slice(0, 7);
+  const powerball = pbBalls[0];
+
+  const isModern = mainNumbers.length === 7 && mainNumbers.every(n => n >= 1 && n <= 35) && powerball >= 1 && powerball <= 20;
+
+  return {
+    drawNumber: drawNum,
+    drawDate,
+    numbers: mainNumbers.sort((a, b) => a - b),
+    powerball,
+    isModernFormat: isModern,
+  };
 }
 
 function parseCSVRow(headers: string[], cols: string[]): any | null {
