@@ -8,6 +8,7 @@ import { fetchApi, runBenchmark } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import type { ValidationSummary, BenchmarkSummary, BenchmarkRunConfig, BenchmarkStrategyStability, RegimeSplitResult } from "@shared/schema";
 import { HelpTip } from "@/components/help-tip";
+import { useGame } from "@/contexts/game-context";
 
 const STRATEGY_DESCRIPTIONS: Record<string, string> = {
   "Random": "Random ensemble baseline — averaged across multiple seeded runs for stability.",
@@ -232,11 +233,12 @@ function getPresetPermutationTargets(preset: BenchmarkPreset): string[] | undefi
 export default function Validation() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const { data: stats } = useQuery({ queryKey: ["/api/stats"], queryFn: () => fetchApi("/api/stats") });
-  const { data: validation } = useQuery<ValidationSummary>({ queryKey: ["/api/analysis/validation"], queryFn: () => fetchApi("/api/analysis/validation"), enabled: !!stats?.modernDraws });
+  const { activeGameId } = useGame();
+  const { data: stats } = useQuery({ queryKey: ["/api/stats", activeGameId], queryFn: () => fetchApi(`/api/stats?gameId=${activeGameId}`) });
+  const { data: validation } = useQuery<ValidationSummary>({ queryKey: ["/api/analysis/validation", activeGameId], queryFn: () => fetchApi(`/api/analysis/validation?gameId=${activeGameId}`), enabled: !!stats?.modernDraws });
   const { data: benchmarkHistory } = useQuery<BenchmarkHistoryItem[]>({
-    queryKey: ["/api/validation/benchmark/history"],
-    queryFn: () => fetchApi("/api/validation/benchmark/history"),
+    queryKey: ["/api/validation/benchmark/history", activeGameId],
+    queryFn: () => fetchApi(`/api/validation/benchmark/history?gameId=${activeGameId}`),
   });
 
   const [benchmark, setBenchmark] = useState<BenchmarkSummary | null>(null);
@@ -340,6 +342,7 @@ export default function Validation() {
         presetName: presetInfo.presetName,
         permutationStrategies: permTargets,
         regimeSplits: config.regimeSplits,
+        gameId: activeGameId,
       });
       setBenchmark(result);
       if (result.runConfigUsed) {

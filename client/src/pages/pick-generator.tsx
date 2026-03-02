@@ -9,6 +9,7 @@ import { generatePicks, fetchApi, fetchRecommendation, runAutoGenerate, runAutoC
 import { useQuery } from "@tanstack/react-query";
 import type { GeneratedPick, GeneratorMode, GeneratorRecommendation } from "@shared/schema";
 import { HelpTip } from "@/components/help-tip";
+import { useGame } from "@/contexts/game-context";
 
 function Tip({ label, tip, className }: { label: string; tip: string; className?: string }) {
   return (
@@ -290,10 +291,11 @@ export default function PickGenerator() {
   const [simpleResult, setSimpleResult] = useState<SimpleResult | null>(null);
   const [showDetails, setShowDetails] = useState(false);
 
-  const { data: stats } = useQuery({ queryKey: ["/api/stats"], queryFn: () => fetchApi("/api/stats") });
+  const { activeGameId } = useGame();
+  const { data: stats } = useQuery({ queryKey: ["/api/stats", activeGameId], queryFn: () => fetchApi(`/api/stats?gameId=${activeGameId}`) });
   const { data: recommendation } = useQuery<GeneratorRecommendation>({
-    queryKey: ["/api/generator/recommendation"],
-    queryFn: fetchRecommendation,
+    queryKey: ["/api/generator/recommendation", activeGameId],
+    queryFn: () => fetchRecommendation(activeGameId),
     enabled: !!stats?.modernDraws,
     staleTime: 0,
     refetchOnMount: "always",
@@ -309,7 +311,7 @@ export default function PickGenerator() {
     setIsLaneARunning(true);
     setSimpleResult(null);
     try {
-      const result = await runAutoCompositeNoFrequency();
+      const result = await runAutoCompositeNoFrequency(activeGameId);
       setSimpleResult(result);
       toast({ title: "Picks generated", description: "12 lines using Composite No-Frequency." });
     } catch (error: any) {
@@ -326,7 +328,7 @@ export default function PickGenerator() {
     setLaneBStep("Optimising...");
     try {
       setLaneBStep("Step 1: Running optimiser...");
-      const result = await runAutoOptimiseAndGenerate();
+      const result = await runAutoOptimiseAndGenerate(activeGameId);
       setLaneBStep("");
       setSimpleResult(result);
       toast({ title: "Optimised picks generated", description: `12 lines using optimised formula (${result.optimiserMeta?.formulaHash}).` });
@@ -345,7 +347,7 @@ export default function PickGenerator() {
     }
     setIsGenerating(true);
     try {
-      const result = await generatePicks(selectedMode, drawFitWeight, antiPopWeight, 10);
+      const result = await generatePicks(selectedMode, drawFitWeight, antiPopWeight, 10, activeGameId);
       setPicks(result);
     } catch (error: any) {
       toast({ title: "Generation failed", description: error.message, variant: "destructive" });

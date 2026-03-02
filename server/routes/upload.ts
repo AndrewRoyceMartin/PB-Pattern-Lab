@@ -15,6 +15,7 @@ export function registerUploadRoutes(app: Express): void {
       }
 
       const csvText = req.file.buffer.toString("utf-8");
+      const gameId = (req.body?.gameId as string) || undefined;
 
       let records: string[][];
       try {
@@ -36,7 +37,7 @@ export function registerUploadRoutes(app: Express): void {
       const headerCols = records[0].map(h => h.trim().toLowerCase());
       const dataRows = records.slice(1);
 
-      await storage.clearDraws();
+      await storage.clearDraws(gameId);
 
       const drawsToInsert: any[] = [];
       const errors: string[] = [];
@@ -54,6 +55,7 @@ export function registerUploadRoutes(app: Express): void {
           continue;
         }
 
+        if (gameId) parsed.gameId = gameId;
         drawsToInsert.push(parsed);
       }
 
@@ -84,27 +86,30 @@ export function registerUploadRoutes(app: Express): void {
     }
   });
 
-  app.delete("/api/draws", async (_req, res) => {
+  app.delete("/api/draws", async (req, res) => {
     try {
-      await storage.clearDraws();
-      res.json({ ok: true, meta: { drawsUsed: 0, modernFormatOnly: true, generatedAt: new Date().toISOString() }, data: { message: "All draw data cleared." } });
+      const gameId = (req.query.gameId as string) || undefined;
+      await storage.clearDraws(gameId);
+      res.json({ ok: true, meta: { drawsUsed: 0, modernFormatOnly: true, generatedAt: new Date().toISOString() }, data: { message: gameId ? `All ${gameId} draw data cleared.` : "All draw data cleared." } });
     } catch (error: any) {
       res.status(500).json({ ok: false, message: error.message });
     }
   });
 
-  app.get("/api/draws", async (_req, res) => {
+  app.get("/api/draws", async (req, res) => {
     try {
-      const draws = await storage.getModernDraws();
+      const gameId = (req.query.gameId as string) || undefined;
+      const draws = await storage.getModernDraws(gameId);
       res.json(apiResponse(draws, draws));
     } catch (error: any) {
       res.status(500).json({ ok: false, message: error.message });
     }
   });
 
-  app.get("/api/stats", async (_req, res) => {
+  app.get("/api/stats", async (req, res) => {
     try {
-      const allDraws = await storage.getAllDraws();
+      const gameId = (req.query.gameId as string) || undefined;
+      const allDraws = await storage.getAllDraws(gameId);
       const modernDraws = allDraws.filter(d => d.isModernFormat);
       const latestDate = modernDraws.length > 0 ? modernDraws[0].drawDate : null;
       res.json(apiResponse(allDraws, {

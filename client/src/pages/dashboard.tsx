@@ -2,6 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Activity, Database, Trophy, ShieldAlert, Info } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchApi } from "@/lib/api";
+import { useGame } from "@/contexts/game-context";
 
 
 interface BestStrategy {
@@ -103,13 +104,14 @@ function explainDelta(delta: number, windowsBeating: number, windowsTested: numb
 }
 
 export default function Dashboard() {
+  const { activeGameId } = useGame();
   const { data: overview } = useQuery<OverviewData>({
-    queryKey: ["/api/system/overview"],
-    queryFn: () => fetchApi("/api/system/overview"),
+    queryKey: ["/api/system/overview", activeGameId],
+    queryFn: () => fetchApi(`/api/system/overview?gameId=${activeGameId}`),
   });
   const { data: draws } = useQuery({
-    queryKey: ["/api/draws"],
-    queryFn: () => fetchApi("/api/draws"),
+    queryKey: ["/api/draws", activeGameId],
+    queryFn: () => fetchApi(`/api/draws?gameId=${activeGameId}`),
   });
 
   const hasData = (overview?.totalDraws ?? 0) > 0;

@@ -1,0 +1,208 @@
+Yep — we can do this. The cleanest “scraper” approach for NSW Powerball + Saturday Lotto is to pull the embedded JSON from The Lott results pages, rather than HTML-scraping tables.
+
+Why: it’s more stable, easier to parse, and gives you draw number/date/numbers cleanly.
+
+Confirmed public results pages
+
+Powerball results page: https://www.thelott.com/powerball/results
+
+Saturday Lotto results page: https://www.thelott.com/saturday-lotto/results
+
+And it’s very likely those pages load JSON data internally (there are examples of people extracting JSON from The Lott results pages).
+
+Implementation plan for PB-Pattern-Lab scrapers
+1) Add two “sources” with the same adapter interface
+
+Create:
+
+server/sources/thelott/powerball.ts
+
+server/sources/thelott/saturdayLotto.ts
+
+server/sources/thelott/common.ts
+
+Each source should implement:
+
+listGame() → returns game metadata (k/N/special balls)
+
+fetchDraws({from,to,page}) → returns normalized draws list
+
+Normalized draw format (what your system already uses):
+
+gameId
+
+drawDateTimeLocal (Australia/Sydney)
+
+drawDateTimeUTC (converted)
+
+mainNumbers: number[]
+
+specialBalls: { [name]: number }
+
+drawNumber (string/int)
+
+rawSource (optional JSON payload stored for debugging)
+
+2) Scrape JSON, not HTML
+Step A — Fetch the results page HTML
+
+Use server-side fetch() with a normal User-Agent.
+
+Step B — Extract the embedded JSON payload
+
+Common patterns (we’ll implement multiple fallbacks):
+
+<script id="__NEXT_DATA__">…</script> (Next.js apps)
+
+<script type="application/ld+json">…</script> (structured data)
+
+Inline JS variables like window.__APOLLO_STATE__ or __DATA__
+
+Hidden API endpoints referenced in the HTML (last resort)
+
+Step C — Parse the draw model from JSON
+
+We only need:
+
+draw date
+
+winning numbers list
+
+special ball (Powerball)
+
+draw number (if present)
+
+This will be more reliable than brittle CSS selectors.
+
+3) Add sync endpoints
+
+Add two endpoints that can be run manually or on a schedule:
+
+POST /api/sync/thelott/powerball
+
+POST /api/sync/thelott/saturday-lotto
+
+Request body (simple):
+
+{
+  "maxPages": 10,
+  "stopIfSeen": true
+}
+
+Behavior:
+
+Crawl “past results” pagination if available
+
+Insert draws until you hit an existing draw date/draw number
+
+Upsert into your draws table with gameId
+
+4) Add startup game selection
+
+At app startup:
+
+Load /api/games
+
+Prompt: “Which game?”
+
+Powerball (NSW)
+
+Saturday Lotto (NSW)
+
+Store activeGameId in localStorage and append ?gameId=... so links share.
+
+5) Game definitions you’ll create
+Powerball (AU / NSW)
+
+gameId: AU_POWERBALL
+
+mains: 7 from 1–35
+
+special: Powerball 1 from 1–20
+
+Saturday Lotto (AU / NSW)
+
+You’ll need to decide which “Saturday Lotto” you mean:
+
+Saturday Gold Lotto
+
+Saturday X Lotto
+
+Saturday TattsLotto (varies by brand/state)
+
+The The Lott page you linked is “Saturday Lotto” results, but it may represent a product group with sub-types.
+We’ll confirm the exact rules from the extracted JSON (usually present), then store:
+
+mains: typically 6 from 1–45
+
+supplementaries: 2 from 1–45 (often present)
+If supplementaries exist, store them in specialBalls as Supplementary1/2 or an array.
+
+Replit patch tasks (copy/paste)
+Task A — Add TheLott scraping module
+
+Add server/sources/thelott/common.ts with:
+
+fetchHtml(url)
+
+extractJsonCandidates(html) (multiple patterns)
+
+findDrawPayload(jsonCandidates) (game-specific)
+
+Add powerball.ts and saturdayLotto.ts adapters to return normalized draws
+
+Acceptance
+
+Can parse the latest draw for each game and print:
+
+draw date
+
+main numbers
+
+special balls
+
+draw number (if available)
+
+Task B — Add sync endpoints
+
+Add POST /api/sync/thelott/powerball
+
+Add POST /api/sync/thelott/saturday-lotto
+
+Upsert draws into DB with correct gameId
+
+Acceptance
+
+Running sync populates draws table for each game
+
+Re-running sync is idempotent (no duplicates)
+
+Task C — Add games to catalog + game selector
+
+Insert game metadata rows into games table
+
+Add frontend selector modal/dropdown and persist activeGameId
+
+Acceptance
+
+User selects a game at startup
+
+All analysis/validation/generator calls include activeGameId
+
+Task D — Make analysis engine parameterized
+
+Replace any remaining hardcoded 35/7/20 assumptions with values from games config
+
+Acceptance
+
+Works identically for Powerball and Saturday Lotto formats
+
+Important note (practical + legal)
+
+Scraping official sites can break if HTML/JS changes and may be restricted by terms. We’ll build:
+
+rate limiting
+
+caching
+
+a “manual sync” button (not aggressive background polling)

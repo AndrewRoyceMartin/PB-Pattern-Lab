@@ -8,6 +8,7 @@ import { FlaskConical, Play, Loader2, AlertTriangle, Info, ShieldAlert, BarChart
 import { useQuery } from "@tanstack/react-query";
 import { fetchApi } from "@/lib/api";
 import type { FormulaLabResult, FormulaFeatureConfig } from "@shared/schema";
+import { useGame } from "@/contexts/game-context";
 
 function Tip({ label, tip, className }: { label: string; tip: string; className?: string }) {
   return (
@@ -121,7 +122,8 @@ const FEATURE_OPTIONS: { key: keyof FormulaFeatureConfig; label: string; tip: st
 ];
 
 export default function FormulaLab() {
-  const { data: stats } = useQuery({ queryKey: ["/api/stats"], queryFn: () => fetchApi("/api/stats") });
+  const { activeGameId } = useGame();
+  const { data: stats } = useQuery({ queryKey: ["/api/stats", activeGameId], queryFn: () => fetchApi(`/api/stats?gameId=${activeGameId}`) });
   const hasData = stats?.modernDraws >= 50;
 
   const [features, setFeatures] = useState<FormulaFeatureConfig>({
@@ -149,6 +151,7 @@ export default function FormulaLab() {
           searchIterations: searchIterations[0],
           regularizationStrength: regularization[0] / 100,
           objective: "mean_best_score",
+          gameId: activeGameId,
         }),
       });
       const json = await res.json();

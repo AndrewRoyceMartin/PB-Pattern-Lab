@@ -1,41 +1,66 @@
 # Powerball Pattern Lab
 
 ## Overview
-Powerball Pattern Lab is a full-stack web application for analyzing the Australian Powerball lottery. It allows users to import historical draw data (via CSV upload or RSS feed sync), discover statistical patterns (frequency, recency, structure, carryover), validate these patterns via walk-forward backtesting, and generate ranked number picks. The core principle is a "benchmark-first" approach, validating pattern strategies against seeded random ensemble baselines with permutation significance testing and anti-popularity scoring to ensure practical utility and avoid look-ahead bias.
+Powerball Pattern Lab is a full-stack web application for analyzing Australian lottery games. It supports multiple games (AU Powerball and Saturday Lotto) via TheLott public JSON API and Lottolyzer bulk import. Users can import historical draw data, discover statistical patterns (frequency, recency, structure, carryover), validate these patterns via walk-forward backtesting, and generate ranked number picks. The core principle is a "benchmark-first" approach, validating pattern strategies against seeded random ensemble baselines with permutation significance testing and anti-popularity scoring to ensure practical utility and avoid look-ahead bias.
 
 ## User Preferences
 Preferred communication style: Simple, everyday language.
 
 ## System Architecture
 
+### Multi-Game Support
+- **Game Catalog**: `games` table stores game definitions (pool sizes, ball counts, product filters). Currently supports:
+  - `AU_POWERBALL`: 7 from 35 + Powerball 1 from 20
+  - `AU_SATURDAY_LOTTO`: 6 from 45 + 2 supplementary from 45
+- **GameConfig Interface**: `{ gameId, mainPool, mainCount, specialPool, specialCount, specialName }` — passed through all analysis/generation functions.
+- **Game Context**: React `GameProvider` stores active game in localStorage; all API calls pass `gameId` query param or request body field.
+- **Game Selector**: Dropdown in sidebar layout; switching games filters all data and analysis.
+
+### Data Sources
+- **TheLott API** (primary): POST `https://data.api.thelott.com/sales/vmax/web/data/lotto/latestresults` with `CompanyId` and `OptionalProductFilter`. Returns up to 10 draws per request.
+  - Sync endpoints: `POST /api/sync/thelott/powerball`, `POST /api/sync/thelott/saturday-lotto`
+  - Module: `server/sources/thelott/` (common.ts, powerball.ts, saturdayLotto.ts)
+- **Lottolyzer RSS** (Powerball-only fallback): `POST /api/rss-sync`, `POST /api/rss-sync-all` for bulk historical import.
+- **CSV Upload**: Game-aware, passes `gameId` with upload.
+
 ### Frontend
 - **Framework**: React with TypeScript, Vite
 - **Routing**: Wouter, supporting System Overview (Dashboard), CSV Ingest, Pattern Lab, Validation, Pick Generator, and Formula Lab.
 - **UI Components**: shadcn/ui (New York style) built on Radix UI and Tailwind CSS.
-- **State Management**: TanStack React Query for server state, local React state for UI.
+- **State Management**: TanStack React Query for server state (query keys include `activeGameId`), local React state for UI, `GameProvider` context for active game.
 - **Styling**: Tailwind CSS v4, dark mode by default, Inter and JetBrains Mono fonts.
 
 ### Backend
 - **Runtime**: Node.js with Express.
 - **Language**: TypeScript.
-- **API Pattern**: RESTful JSON API under `/api/`, using `{ok, meta, data}` response format.
+- **API Pattern**: RESTful JSON API under `/api/`, using `{ok, meta, data}` response format. All endpoints accept `gameId` via query param (GET) or request body (POST).
 - **Request Validation**: Zod schemas validate all POST endpoints with structured 400 error responses.
 - **Core Engines**:
-    - **Pattern Discovery**: Extracts frequency, structure, carryover, and rolling drift patterns.
+    - **Pattern Discovery**: Extracts frequency, structure, carryover, and rolling drift patterns. All functions accept `gc: GameConfig = DEFAULT_GAME_CONFIG`.
     - **Validation**: Walk-forward backtesting (24 strategies), multi-window benchmarking with seeded random ensemble, permutation significance testing, stability classification, 3 benchmark presets, regime split testing, and config transparency (runConfigUsed echo).
-    - **Generator**: Ranked picks via a handler registry (16 modes including frequency benchmarks, Bayesian-smoothed strategies, Strategy Portfolio, Structure-Matched Random, Anti-Popular Only, Diversity Optimized, and Random Baseline).
-    - **Auto Run**: Three endpoints for one-click 12-line generation:
+    - **Generator**: Ranked picks via a handler registry (16 modes). All handlers receive `gc` via `GeneratorHandlerContext`.
+    - **Auto Run**: Three endpoints for one-click 12-line generation, all game-aware:
       - `POST /api/auto/generate` — Generic: runs rolling benchmark, selects top strategy by avg delta vs random, generates 12 lines.
-      - `POST /api/auto/generate-composite-no-frequency` — Recommended lane: direct generation using Composite No-Frequency strategy (fast, no optimiser).
+      - `POST /api/auto/generate-composite-no-frequency` — Recommended lane: direct generation using Composite No-Frequency strategy.
       - `POST /api/auto/optimise-and-generate` — Experimental lane: runs Formula Lab optimiser fresh, generates 12 lines with jittered optimised weights.
     - **Pick Run Stamps**: Every auto-generated result includes a `runStamp` tracking `strategyName`, `benchmarkRunId`, `optimiserUsed`, `optimiserRunId`, `formulaHash`, `seed`, and `generatedAt` for full audit trail.
-    - **Formula Lab**: Weighted feature formula optimization, walk-forward replay, Monte Carlo permutation test, and overfit risk diagnostics. `generateFormulaCard` exported for use by Auto Run optimiser lane.
+    - **Formula Lab**: Weighted feature formula optimization, walk-forward replay, Monte Carlo permutation test, and overfit risk diagnostics. Accepts `gc: GameConfig` for parameterized pool/count.
 
 ### Database
 - **Database**: PostgreSQL.
 - **ORM**: Drizzle ORM with `drizzle-zod`.
-- **Schema**: `draws` (historical lottery data), `benchmark_runs` (persisted results), `users` (planned).
-- **Migrations**: Drizzle Kit.
+- **Schema**: `games` (game definitions), `draws` (historical lottery data with `gameId` FK), `benchmark_runs` (persisted results with `gameId` FK), `users` (planned).
+- **Migrations**: Drizzle Kit (`npm run db:push`).
+- **Seeding**: `seedGames()` called on startup to upsert game definitions.
+
+### Parameterized Analysis Engine
+- All analysis functions in `server/analysis.ts` accept `gc: GameConfig = DEFAULT_GAME_CONFIG` as their last parameter.
+- `computeNumberFrequencies`: loops `1..gc.mainPool` instead of hardcoded 35.
+- `seededRandomCard`, `generateRandomCard`: use `gc.mainPool`, `gc.mainCount`, `gc.specialPool`.
+- Structure features: decade categories computed dynamically via `buildDecadeMap(gc.mainPool)`.
+- Strategy registry: `getStrategyRegistry(gc)` passes gc through all strategy lambdas.
+- Generator registry: all 16 handlers pass `ctx.gc` to analysis functions.
+- Formula Lab: `generateFormulaCard`, `generateDiverseFormulaCard`, `runFormulaOptimizer` all accept `gc`.
 
 ### Validation Engine — Strategy Registry (24 strategies)
 1. Random (seeded ensemble baseline)
@@ -100,13 +125,15 @@ Preferred communication style: Simple, everyday language.
 11. **Results-first UI**: Validation page uses a three-tier layout with summary-first, details on demand.
 12. **Config transparency**: Backend echoes `runConfigUsed` in responses; exports use result payload not current UI state.
 13. **Atomic preset application**: Presets override mode/permutation/regime atomically; manual changes clear preset indicator.
-14. **Data-driven System Overview**: Dashboard tiles reflect actual benchmark winner (Best Strategy vs Random), not hardcoded Composite. Verdict, delta, runner-up, and benchmark metadata all pulled from `GET /api/system/overview` which reads latest persisted benchmark run.
-15. **RSS feed sync**: `POST /api/rss-sync` fetches latest AU Powerball draws from Lottolyzer RSS feed, parses ball images from HTML descriptions, deduplicates by draw number, and inserts new draws. Supplements CSV bulk import for keeping data current.
+14. **Data-driven System Overview**: Dashboard tiles reflect actual benchmark winner (Best Strategy vs Random), not hardcoded Composite.
+15. **Multi-game architecture**: `GameConfig` interface parameterizes all analysis/generation functions. No hardcoded pool sizes (35/7/20) remain in analysis engine.
+16. **TheLott API integration**: Primary data source for both games. POST to public JSON endpoint, no auth needed. Lottolyzer kept as Powerball bulk import fallback.
+17. **Game-aware storage**: All draw/benchmark queries accept optional `gameId` filter. Default `AU_POWERBALL` for backward compatibility.
 
 ## External Dependencies
 
 ### Required Services
-- **PostgreSQL Database**: For storing imported draw data and benchmark runs.
+- **PostgreSQL Database**: For storing imported draw data, game definitions, and benchmark runs.
 
 ### Key NPM Packages
 - **Frontend**: React, Wouter, TanStack React Query, shadcn/ui, Tailwind CSS, Recharts, Embla Carousel.

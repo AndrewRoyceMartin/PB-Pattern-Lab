@@ -1,45 +1,47 @@
 import { queryClient } from "./queryClient";
 import type { GeneratorMode } from "@shared/schema";
 
-export async function uploadCSV(file: File) {
+function invalidateAll() {
+  queryClient.invalidateQueries({ queryKey: ["/api/draws"] });
+  queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
+  queryClient.invalidateQueries({ queryKey: ["/api/analysis/frequencies"] });
+  queryClient.invalidateQueries({ queryKey: ["/api/analysis/features"] });
+  queryClient.invalidateQueries({ queryKey: ["/api/analysis/audit"] });
+  queryClient.invalidateQueries({ queryKey: ["/api/analysis/validation"] });
+  queryClient.invalidateQueries({ queryKey: ["/api/analysis/structure-profile"] });
+  queryClient.invalidateQueries({ queryKey: ["/api/system/overview"] });
+  queryClient.invalidateQueries({ queryKey: ["/api/generator/recommendation"] });
+}
+
+export async function uploadCSV(file: File, gameId?: string) {
   const formData = new FormData();
   formData.append("file", file);
+  if (gameId) formData.append("gameId", gameId);
   const res = await fetch("/api/upload", { method: "POST", body: formData });
   const json = await res.json();
   if (!res.ok || !json.ok) {
     throw new Error(json.message || "Upload failed");
   }
-  queryClient.invalidateQueries({ queryKey: ["/api/draws"] });
-  queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
-  queryClient.invalidateQueries({ queryKey: ["/api/analysis/frequencies"] });
-  queryClient.invalidateQueries({ queryKey: ["/api/analysis/features"] });
-  queryClient.invalidateQueries({ queryKey: ["/api/analysis/audit"] });
-  queryClient.invalidateQueries({ queryKey: ["/api/analysis/validation"] });
-  queryClient.invalidateQueries({ queryKey: ["/api/analysis/structure-profile"] });
+  invalidateAll();
   return json.data;
 }
 
-export async function resetData() {
-  const res = await fetch("/api/draws", { method: "DELETE" });
+export async function resetData(gameId?: string) {
+  const url = gameId ? `/api/draws?gameId=${gameId}` : "/api/draws";
+  const res = await fetch(url, { method: "DELETE" });
   const json = await res.json();
   if (!res.ok || !json.ok) {
     throw new Error(json.message || "Reset failed");
   }
-  queryClient.invalidateQueries({ queryKey: ["/api/draws"] });
-  queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
-  queryClient.invalidateQueries({ queryKey: ["/api/analysis/frequencies"] });
-  queryClient.invalidateQueries({ queryKey: ["/api/analysis/features"] });
-  queryClient.invalidateQueries({ queryKey: ["/api/analysis/audit"] });
-  queryClient.invalidateQueries({ queryKey: ["/api/analysis/validation"] });
-  queryClient.invalidateQueries({ queryKey: ["/api/analysis/structure-profile"] });
+  invalidateAll();
   return json.data;
 }
 
-export async function generatePicks(mode: GeneratorMode, drawFitWeight: number, antiPopWeight: number, count: number = 10) {
+export async function generatePicks(mode: GeneratorMode, drawFitWeight: number, antiPopWeight: number, count: number = 10, gameId?: string) {
   const res = await fetch("/api/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ mode, drawFitWeight, antiPopWeight, count }),
+    body: JSON.stringify({ mode, drawFitWeight, antiPopWeight, count, gameId }),
   });
   const json = await res.json();
   if (!res.ok || !json.ok) {
@@ -60,6 +62,7 @@ export interface BenchmarkOptions {
   presetName?: string;
   permutationStrategies?: string[];
   regimeSplits?: boolean;
+  gameId?: string;
 }
 
 export async function runBenchmark(opts: BenchmarkOptions = {}) {
@@ -78,6 +81,7 @@ export async function runBenchmark(opts: BenchmarkOptions = {}) {
       presetName: opts.presetName,
       permutationStrategies: opts.permutationStrategies,
       regimeSplits: opts.regimeSplits ?? false,
+      gameId: opts.gameId,
     }),
   });
   const json = await res.json();
@@ -88,10 +92,11 @@ export async function runBenchmark(opts: BenchmarkOptions = {}) {
   return json.data;
 }
 
-export async function runAutoGenerate() {
+export async function runAutoGenerate(gameId?: string) {
   const res = await fetch("/api/auto/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ gameId }),
   });
   const json = await res.json();
   if (!res.ok || !json.ok) {
@@ -101,10 +106,11 @@ export async function runAutoGenerate() {
   return json.data;
 }
 
-export async function runAutoCompositeNoFrequency() {
+export async function runAutoCompositeNoFrequency(gameId?: string) {
   const res = await fetch("/api/auto/generate-composite-no-frequency", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ gameId }),
   });
   const json = await res.json();
   if (!res.ok || !json.ok) {
@@ -113,10 +119,11 @@ export async function runAutoCompositeNoFrequency() {
   return json.data;
 }
 
-export async function runAutoOptimiseAndGenerate() {
+export async function runAutoOptimiseAndGenerate(gameId?: string) {
   const res = await fetch("/api/auto/optimise-and-generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ gameId }),
   });
   const json = await res.json();
   if (!res.ok || !json.ok) {
@@ -131,13 +138,7 @@ export async function syncRSSAll() {
   if (!res.ok || !json.ok) {
     throw new Error(json.message || "Full sync failed");
   }
-  queryClient.invalidateQueries({ queryKey: ["/api/draws"] });
-  queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
-  queryClient.invalidateQueries({ queryKey: ["/api/analysis/frequencies"] });
-  queryClient.invalidateQueries({ queryKey: ["/api/analysis/features"] });
-  queryClient.invalidateQueries({ queryKey: ["/api/analysis/audit"] });
-  queryClient.invalidateQueries({ queryKey: ["/api/analysis/validation"] });
-  queryClient.invalidateQueries({ queryKey: ["/api/analysis/structure-profile"] });
+  invalidateAll();
   return json.data;
 }
 
@@ -147,18 +148,27 @@ export async function syncRSS() {
   if (!res.ok || !json.ok) {
     throw new Error(json.message || "RSS sync failed");
   }
-  queryClient.invalidateQueries({ queryKey: ["/api/draws"] });
-  queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
-  queryClient.invalidateQueries({ queryKey: ["/api/analysis/frequencies"] });
-  queryClient.invalidateQueries({ queryKey: ["/api/analysis/features"] });
-  queryClient.invalidateQueries({ queryKey: ["/api/analysis/audit"] });
-  queryClient.invalidateQueries({ queryKey: ["/api/analysis/validation"] });
-  queryClient.invalidateQueries({ queryKey: ["/api/analysis/structure-profile"] });
+  invalidateAll();
   return json.data;
 }
 
-export async function fetchRecommendation() {
-  const res = await fetch("/api/generator/recommendation");
+export async function syncTheLott(gameType: "powerball" | "saturday-lotto") {
+  const res = await fetch(`/api/sync/thelott/${gameType}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ maxPages: 1, stopIfSeen: true }),
+  });
+  const json = await res.json();
+  if (!res.ok || !json.ok) {
+    throw new Error(json.message || "TheLott sync failed");
+  }
+  invalidateAll();
+  return json.data;
+}
+
+export async function fetchRecommendation(gameId?: string) {
+  const url = gameId ? `/api/generator/recommendation?gameId=${gameId}` : "/api/generator/recommendation";
+  const res = await fetch(url);
   const json = await res.json();
   if (!res.ok || !json.ok) {
     throw new Error(json.message || "Failed to fetch recommendation");

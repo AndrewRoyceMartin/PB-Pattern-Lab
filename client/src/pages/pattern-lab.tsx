@@ -8,6 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchApi } from "@/lib/api";
 import { Link } from "wouter";
 import type { NumberFrequency, AuditSummary, StructureProfile } from "@shared/schema";
+import { useGame } from "@/contexts/game-context";
 
 type SortPreset = "default" | "top_all_time" | "hot_l10" | "hot_l25" | "hot_l50" | "cold_l50" | "most_overdue" | "trend_up" | "trend_down";
 
@@ -122,12 +123,13 @@ function AuditCard({ audit, title }: { audit: AuditSummary; title: string }) {
 
 export default function PatternLab() {
   const [sortPreset, setSortPreset] = useState<SortPreset>("default");
+  const { activeGameId } = useGame();
 
-  const { data: stats } = useQuery({ queryKey: ["/api/stats"], queryFn: () => fetchApi("/api/stats") });
-  const { data: freqs } = useQuery<NumberFrequency[]>({ queryKey: ["/api/analysis/frequencies"], queryFn: () => fetchApi("/api/analysis/frequencies"), enabled: !!stats?.modernDraws });
-  const { data: features } = useQuery({ queryKey: ["/api/analysis/features"], queryFn: () => fetchApi("/api/analysis/features"), enabled: !!stats?.modernDraws });
-  const { data: audit } = useQuery<{ main: AuditSummary; powerball: AuditSummary }>({ queryKey: ["/api/analysis/audit"], queryFn: () => fetchApi("/api/analysis/audit"), enabled: !!stats?.modernDraws });
-  const { data: structureProfile } = useQuery<StructureProfile>({ queryKey: ["/api/analysis/structure-profile"], queryFn: () => fetchApi("/api/analysis/structure-profile"), enabled: !!stats?.modernDraws });
+  const { data: stats } = useQuery({ queryKey: ["/api/stats", activeGameId], queryFn: () => fetchApi(`/api/stats?gameId=${activeGameId}`) });
+  const { data: freqs } = useQuery<NumberFrequency[]>({ queryKey: ["/api/analysis/frequencies", activeGameId], queryFn: () => fetchApi(`/api/analysis/frequencies?gameId=${activeGameId}`), enabled: !!stats?.modernDraws });
+  const { data: features } = useQuery({ queryKey: ["/api/analysis/features", activeGameId], queryFn: () => fetchApi(`/api/analysis/features?gameId=${activeGameId}`), enabled: !!stats?.modernDraws });
+  const { data: audit } = useQuery<{ main: AuditSummary; powerball: AuditSummary }>({ queryKey: ["/api/analysis/audit", activeGameId], queryFn: () => fetchApi(`/api/analysis/audit?gameId=${activeGameId}`), enabled: !!stats?.modernDraws });
+  const { data: structureProfile } = useQuery<StructureProfile>({ queryKey: ["/api/analysis/structure-profile", activeGameId], queryFn: () => fetchApi(`/api/analysis/structure-profile?gameId=${activeGameId}`), enabled: !!stats?.modernDraws });
 
   const hasData = stats?.modernDraws > 0;
   const allFeatures = [...(features?.structure || []), ...(features?.carryover || [])];

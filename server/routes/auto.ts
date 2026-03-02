@@ -1,7 +1,7 @@
 import type { Express } from "express";
-import { storage } from "../storage";
+import { storage, getGameConfig, DEFAULT_GAME_CONFIG } from "../storage";
 import { apiResponse } from "./helpers";
-import type { BenchmarkRunConfig, BenchmarkStrategyStability, GeneratedPick, FormulaWeights, BenchmarkRun } from "@shared/schema";
+import type { BenchmarkRunConfig, BenchmarkStrategyStability, GeneratedPick, FormulaWeights, BenchmarkRun, GameConfig } from "@shared/schema";
 import {
   runBenchmarkValidation,
   storeBenchmarkResult,
@@ -10,6 +10,12 @@ import {
 import { getGeneratorHandler } from "../generator-registry";
 import { runFormulaOptimizer, generateFormulaCard, generateDiverseFormulaCard } from "../formula-lab";
 import crypto from "crypto";
+
+async function resolveGameConfig(gameId?: string): Promise<GameConfig> {
+  if (!gameId) return DEFAULT_GAME_CONFIG;
+  const game = await storage.getGame(gameId);
+  return game ? getGameConfig(game) : DEFAULT_GAME_CONFIG;
+}
 
 function buildConfidencePanel(strategyName: string, run: BenchmarkRun | null) {
   if (!run) {
@@ -205,9 +211,11 @@ function generateCNFPicks(draws: any[], seed: number): GeneratedPick[] {
 }
 
 export function registerAutoRoutes(app: Express): void {
-  app.post("/api/auto/generate", async (_req, res) => {
+  app.post("/api/auto/generate", async (req, res) => {
     try {
-      const draws = await storage.getModernDraws();
+      const gameId = (req.body?.gameId as string) || undefined;
+      const gc = await resolveGameConfig(gameId);
+      const draws = await storage.getModernDraws(gameId);
       const minRequired = AUTO_BENCHMARK_CONFIG.minTrainDraws + Math.max(...AUTO_BENCHMARK_CONFIG.windowSizes);
       if (draws.length < minRequired) {
         return res.status(400).json({ ok: false, message: `Only ${draws.length} modern draws available. Need at least ${minRequired} (${AUTO_BENCHMARK_CONFIG.minTrainDraws} training + ${Math.max(...AUTO_BENCHMARK_CONFIG.windowSizes)} test window) for auto-generate.` });
@@ -218,16 +226,16 @@ export function registerAutoRoutes(app: Express): void {
 
       const benchmarkResults = runBenchmarkValidation(
         draws, windowSizes, minTrainDraws, benchmarkMode, seed, randomBaselineRuns,
-        runPermutation, permutationRuns, selectedStrategies, presetName, undefined, regimeSplits,
+        runPermutation, permutationRuns, selectedStrategies, presetName, undefined, regimeSplits, gc,
       );
-      storeBenchmarkResult(benchmarkResults);
+      storeBenchmarkResult(benchmarkResults, gameId);
 
       const runConfigUsed: BenchmarkRunConfig = {
         benchmarkMode, windowSizes, minTrainDraws, seed, randomBaselineRuns,
         runPermutation, permutationRuns, totalDrawsAvailable: draws.length,
         selectedStrategies, presetName, regimeSplits,
       };
-      const run = await storage.saveBenchmarkRun(runConfigUsed, benchmarkResults);
+      const run = await storage.saveBenchmarkRun(runConfigUsed, benchmarkResults, gameId);
 
       const winner = selectWinnerStrategy(benchmarkResults.stabilityByStrategy);
       console.log(`[auto] Winner: ${winner.strategy} (delta: ${winner.avgDelta}, fallback: ${winner.isFallback})`);
@@ -235,7 +243,7 @@ export function registerAutoRoutes(app: Express): void {
       let picks: GeneratedPick[];
       if (winner.isFallback) {
         const handler = getGeneratorHandler("strategy_portfolio");
-        picks = handler({ draws, count: 12, allocationMethod: "validation_weighted" });
+        picks = handler({ draws, count: 12, allocationMethod: "validation_weighted", gc });
       } else {
         const generatorConfig = STRATEGY_TO_GENERATOR[winner.strategy];
         if (generatorConfig && generatorConfig.mode === "composite_no_frequency") {
@@ -246,11 +254,12 @@ export function registerAutoRoutes(app: Express): void {
             draws, count: 12,
             drawFitWeight: generatorConfig.drawFit,
             antiPopWeight: generatorConfig.antiPop,
+            gc,
           });
         } else {
           console.warn(`[auto] Winner strategy "${winner.strategy}" has no generator mapping, using balanced fallback`);
           const handler = getGeneratorHandler("balanced");
-          picks = handler({ draws, count: 12, drawFitWeight: 60, antiPopWeight: 40 });
+          picks = handler({ draws, count: 12, drawFitWeight: 60, antiPopWeight: 40, gc });
         }
       }
 
@@ -297,9 +306,10 @@ export function registerAutoRoutes(app: Express): void {
     }
   });
 
-  app.post("/api/auto/generate-composite-no-frequency", async (_req, res) => {
+  app.post("/api/auto/generate-composite-no-frequency", async (req, res) => {
     try {
-      const draws = await storage.getModernDraws();
+      const gameId = (req.body?.gameId as string) || undefined;
+      const draws = await storage.getModernDraws(gameId);
       if (draws.length < 50) {
         return res.status(400).json({ ok: false, message: `Only ${draws.length} modern draws available. Need at least 50 for generation.` });
       }
@@ -308,7 +318,7 @@ export function registerAutoRoutes(app: Express): void {
       const seed = 42;
       const picks = generateCNFPicks(draws, seed);
 
-      const latestRun = await storage.getLatestBenchmarkRun();
+      const latestRun = await storage.getLatestBenchmarkRun(gameId);
 
       const formulaHash = hashWeights(CNF_WEIGHTS);
       const runStamp = buildRunStamp({
@@ -335,9 +345,10 @@ export function registerAutoRoutes(app: Express): void {
     }
   });
 
-  app.post("/api/auto/optimise-and-generate", async (_req, res) => {
+  app.post("/api/auto/optimise-and-generate", async (req, res) => {
     try {
-      const draws = await storage.getModernDraws();
+      const gameId = (req.body?.gameId as string) || undefined;
+      const draws = await storage.getModernDraws(gameId);
       if (draws.length < 50) {
         return res.status(400).json({ ok: false, message: `Only ${draws.length} modern draws available. Need at least 50 for optimise-and-generate.` });
       }

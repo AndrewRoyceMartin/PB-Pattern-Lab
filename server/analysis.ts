@@ -22,23 +22,27 @@ import {
   type RecommendationEvidence,
   type RecommendationConfidence,
   type RegimeRecommendation,
+  type GameConfig,
+  type StructureProfile,
 } from "@shared/schema";
+import { DEFAULT_GAME_CONFIG } from "./storage";
 
-let latestBenchmarkResult: BenchmarkSummary | null = null;
-let latestBenchmarkTime: string | null = null;
+const benchmarkCache: Map<string, { result: BenchmarkSummary; time: string }> = new Map();
+const DEFAULT_CACHE_KEY = "__default__";
 
-export function storeBenchmarkResult(result: BenchmarkSummary): void {
-  latestBenchmarkResult = result;
-  latestBenchmarkTime = new Date().toISOString();
+export function storeBenchmarkResult(result: BenchmarkSummary, gameId?: string): void {
+  benchmarkCache.set(gameId || DEFAULT_CACHE_KEY, { result, time: new Date().toISOString() });
 }
 
-export function loadBenchmarkFromDb(summary: BenchmarkSummary, createdAt: Date | null): void {
-  latestBenchmarkResult = summary;
-  latestBenchmarkTime = createdAt?.toISOString() ?? new Date().toISOString();
+export function loadBenchmarkFromDb(summary: BenchmarkSummary, createdAt: Date | null, gameId?: string): void {
+  benchmarkCache.set(gameId || DEFAULT_CACHE_KEY, {
+    result: summary,
+    time: createdAt?.toISOString() ?? new Date().toISOString(),
+  });
 }
 
-export function getLatestBenchmarkTime(): string | null {
-  return latestBenchmarkTime;
+export function getLatestBenchmarkTime(gameId?: string): string | null {
+  return benchmarkCache.get(gameId || DEFAULT_CACHE_KEY)?.time ?? null;
 }
 
 const STRATEGY_TO_MODE: Record<string, GeneratorMode> = {
@@ -108,24 +112,40 @@ function fisherYatesShuffle<T>(arr: T[], rng: () => number): T[] {
   return arr;
 }
 
-function seededRandomCard(rng: () => number): number[] {
-  const pool = Array.from({ length: 35 }, (_, i) => i + 1);
+function buildDecadeMap(mainPool: number): Record<string, number> {
+  const decades: Record<string, number> = { "1-9": 0 };
+  for (let d = 10; d <= mainPool; d += 10) {
+    const end = Math.min(d + 9, mainPool);
+    decades[`${d}-${end}`] = 0;
+  }
+  return decades;
+}
+
+function classifyIntoDecade(n: number, decades: Record<string, number>): void {
+  for (const key of Object.keys(decades)) {
+    const [lo, hi] = key.split("-").map(Number);
+    if (n >= lo && n <= hi) { decades[key]++; return; }
+  }
+}
+
+function seededRandomCard(rng: () => number, gc: GameConfig = DEFAULT_GAME_CONFIG): number[] {
+  const pool = Array.from({ length: gc.mainPool }, (_, i) => i + 1);
   const picked: number[] = [];
-  for (let i = 0; i < 7; i++) {
+  for (let i = 0; i < gc.mainCount; i++) {
     const idx = Math.floor(rng() * pool.length);
     picked.push(pool.splice(idx, 1)[0]);
   }
   return picked.sort((a, b) => a - b);
 }
 
-function buildSmoothedPick(draws: Draw[], windowSize: number, alpha: number = 0.3): { picks: number[]; pb: number } {
+function buildSmoothedPick(draws: Draw[], windowSize: number, alpha: number = 0.3, gc: GameConfig = DEFAULT_GAME_CONFIG): { picks: number[]; pb: number } {
   const window = draws.slice(0, Math.min(windowSize, draws.length));
-  if (window.length === 0) return { picks: generateRandomCard(), pb: Math.floor(Math.random() * 20) + 1 };
+  if (window.length === 0) return { picks: generateRandomCard(gc), pb: Math.floor(Math.random() * gc.specialPool) + 1 };
 
-  const uniform = 1 / 35;
+  const uniform = 1 / gc.mainPool;
   const mainScores: { number: number; smoothed: number; lastSeen: number }[] = [];
 
-  for (let n = 1; n <= 35; n++) {
+  for (let n = 1; n <= gc.mainPool; n++) {
     let count = 0;
     let lastSeen = window.length;
     for (let i = 0; i < window.length; i++) {
@@ -140,11 +160,11 @@ function buildSmoothedPick(draws: Draw[], windowSize: number, alpha: number = 0.
   }
 
   mainScores.sort((a, b) => b.smoothed - a.smoothed || a.lastSeen - b.lastSeen || a.number - b.number);
-  const picks = mainScores.slice(0, 7).map(m => m.number).sort((a, b) => a - b);
+  const picks = mainScores.slice(0, gc.mainCount).map(m => m.number).sort((a, b) => a - b);
 
-  const pbUniform = 1 / 20;
+  const pbUniform = 1 / gc.specialPool;
   const pbScores: { number: number; smoothed: number; lastSeen: number }[] = [];
-  for (let n = 1; n <= 20; n++) {
+  for (let n = 1; n <= gc.specialPool; n++) {
     let count = 0;
     let lastSeen = window.length;
     for (let i = 0; i < window.length; i++) {
@@ -159,13 +179,13 @@ function buildSmoothedPick(draws: Draw[], windowSize: number, alpha: number = 0.
   return { picks, pb: pbScores[0]?.number ?? 1 };
 }
 
-function buildRecencySmoothedPick(draws: Draw[], alpha: number = 0.3): { picks: number[]; pb: number } {
-  if (draws.length === 0) return { picks: generateRandomCard(), pb: Math.floor(Math.random() * 20) + 1 };
+function buildRecencySmoothedPick(draws: Draw[], alpha: number = 0.3, gc: GameConfig = DEFAULT_GAME_CONFIG): { picks: number[]; pb: number } {
+  if (draws.length === 0) return { picks: generateRandomCard(gc), pb: Math.floor(Math.random() * gc.specialPool) + 1 };
 
-  const uniform = 1 / 35;
+  const uniform = 1 / gc.mainPool;
   const mainScores: { number: number; score: number }[] = [];
 
-  for (let n = 1; n <= 35; n++) {
+  for (let n = 1; n <= gc.mainPool; n++) {
     let drawsSinceSeen = draws.length;
     for (let i = 0; i < draws.length; i++) {
       if ((draws[i].numbers as number[]).includes(n)) { drawsSinceSeen = i; break; }
@@ -176,15 +196,15 @@ function buildRecencySmoothedPick(draws: Draw[], alpha: number = 0.3): { picks: 
   }
 
   mainScores.sort((a, b) => b.score - a.score || a.number - b.number);
-  const picks = mainScores.slice(0, 7).map(m => m.number).sort((a, b) => a - b);
+  const picks = mainScores.slice(0, gc.mainCount).map(m => m.number).sort((a, b) => a - b);
 
   return { picks, pb: draws[0]?.powerball || 1 };
 }
 
-function buildRecencyGapBalancedPick(draws: Draw[]): { picks: number[]; pb: number } {
-  if (draws.length === 0) return { picks: generateRandomCard(), pb: Math.floor(Math.random() * 20) + 1 };
+function buildRecencyGapBalancedPick(draws: Draw[], gc: GameConfig = DEFAULT_GAME_CONFIG): { picks: number[]; pb: number } {
+  if (draws.length === 0) return { picks: generateRandomCard(gc), pb: Math.floor(Math.random() * gc.specialPool) + 1 };
   const mainScores: { number: number; score: number }[] = [];
-  for (let n = 1; n <= 35; n++) {
+  for (let n = 1; n <= gc.mainPool; n++) {
     let drawsSinceSeen = draws.length;
     for (let i = 0; i < draws.length; i++) {
       if ((draws[i].numbers as number[]).includes(n)) { drawsSinceSeen = i; break; }
@@ -194,13 +214,13 @@ function buildRecencyGapBalancedPick(draws: Draw[]): { picks: number[]; pb: numb
     mainScores.push({ number: n, score });
   }
   mainScores.sort((a, b) => b.score - a.score || a.number - b.number);
-  return { picks: mainScores.slice(0, 7).map(m => m.number).sort((a, b) => a - b), pb: draws[0]?.powerball || 1 };
+  return { picks: mainScores.slice(0, gc.mainCount).map(m => m.number).sort((a, b) => a - b), pb: draws[0]?.powerball || 1 };
 }
 
-function buildRecencyDecayWeightedPick(draws: Draw[], decayRate: number = 0.05): { picks: number[]; pb: number } {
-  if (draws.length === 0) return { picks: generateRandomCard(), pb: Math.floor(Math.random() * 20) + 1 };
+function buildRecencyDecayWeightedPick(draws: Draw[], decayRate: number = 0.05, gc: GameConfig = DEFAULT_GAME_CONFIG): { picks: number[]; pb: number } {
+  if (draws.length === 0) return { picks: generateRandomCard(gc), pb: Math.floor(Math.random() * gc.specialPool) + 1 };
   const mainScores: { number: number; score: number }[] = [];
-  for (let n = 1; n <= 35; n++) {
+  for (let n = 1; n <= gc.mainPool; n++) {
     let score = 0;
     for (let i = 0; i < draws.length; i++) {
       if ((draws[i].numbers as number[]).includes(n)) {
@@ -210,9 +230,9 @@ function buildRecencyDecayWeightedPick(draws: Draw[], decayRate: number = 0.05):
     mainScores.push({ number: n, score });
   }
   mainScores.sort((a, b) => b.score - a.score || a.number - b.number);
-  const picks = mainScores.slice(0, 7).map(m => m.number).sort((a, b) => a - b);
+  const picks = mainScores.slice(0, gc.mainCount).map(m => m.number).sort((a, b) => a - b);
   const pbScores: { number: number; score: number }[] = [];
-  for (let n = 1; n <= 20; n++) {
+  for (let n = 1; n <= gc.specialPool; n++) {
     let score = 0;
     for (let i = 0; i < draws.length; i++) {
       if (draws[i].powerball === n) score += Math.exp(-decayRate * i);
@@ -223,11 +243,11 @@ function buildRecencyDecayWeightedPick(draws: Draw[], decayRate: number = 0.05):
   return { picks, pb: pbScores[0]?.number ?? 1 };
 }
 
-function buildRecencyShortWindowPick(draws: Draw[], windowSize: number = 15): { picks: number[]; pb: number } {
+function buildRecencyShortWindowPick(draws: Draw[], windowSize: number = 15, gc: GameConfig = DEFAULT_GAME_CONFIG): { picks: number[]; pb: number } {
   const window = draws.slice(0, Math.min(windowSize, draws.length));
-  if (window.length === 0) return { picks: generateRandomCard(), pb: Math.floor(Math.random() * 20) + 1 };
+  if (window.length === 0) return { picks: generateRandomCard(gc), pb: Math.floor(Math.random() * gc.specialPool) + 1 };
   const mainScores: { number: number; score: number }[] = [];
-  for (let n = 1; n <= 35; n++) {
+  for (let n = 1; n <= gc.mainPool; n++) {
     let drawsSinceSeen = window.length;
     for (let i = 0; i < window.length; i++) {
       if ((window[i].numbers as number[]).includes(n)) { drawsSinceSeen = i; break; }
@@ -236,81 +256,81 @@ function buildRecencyShortWindowPick(draws: Draw[], windowSize: number = 15): { 
     mainScores.push({ number: n, score: recencyScore });
   }
   mainScores.sort((a, b) => b.score - a.score || a.number - b.number);
-  return { picks: mainScores.slice(0, 7).map(m => m.number).sort((a, b) => a - b), pb: window[0]?.powerball || 1 };
+  return { picks: mainScores.slice(0, gc.mainCount).map(m => m.number).sort((a, b) => a - b), pb: window[0]?.powerball || 1 };
 }
 
-function buildCompositeNoFrequencyPick(draws: Draw[]): { picks: number[]; pb: number } {
-  if (draws.length === 0) return { picks: generateRandomCard(), pb: Math.floor(Math.random() * 20) + 1 };
-  const freqs = computeNumberFrequencies(draws);
+function buildCompositeNoFrequencyPick(draws: Draw[], gc: GameConfig = DEFAULT_GAME_CONFIG): { picks: number[]; pb: number } {
+  if (draws.length === 0) return { picks: generateRandomCard(gc), pb: Math.floor(Math.random() * gc.specialPool) + 1 };
+  const freqs = computeNumberFrequencies(draws, gc);
   const scored = freqs.map(f => ({
     number: f.number,
     score: -f.drawsSinceSeen * 1.5 + f.rollingTrend * 3,
   }));
   const sorted = [...scored].sort((a, b) => b.score - a.score);
-  return { picks: sorted.slice(0, 7).map(f => f.number).sort((a, b) => a - b), pb: draws[0]?.powerball || 1 };
+  return { picks: sorted.slice(0, gc.mainCount).map(f => f.number).sort((a, b) => a - b), pb: draws[0]?.powerball || 1 };
 }
 
-function buildCompositeRecencyHeavyPick(draws: Draw[]): { picks: number[]; pb: number } {
-  if (draws.length === 0) return { picks: generateRandomCard(), pb: Math.floor(Math.random() * 20) + 1 };
-  const freqs = computeNumberFrequencies(draws);
+function buildCompositeRecencyHeavyPick(draws: Draw[], gc: GameConfig = DEFAULT_GAME_CONFIG): { picks: number[]; pb: number } {
+  if (draws.length === 0) return { picks: generateRandomCard(gc), pb: Math.floor(Math.random() * gc.specialPool) + 1 };
+  const freqs = computeNumberFrequencies(draws, gc);
   const scored = freqs.map(f => ({
     number: f.number,
     score: -f.drawsSinceSeen * 3 + f.rollingTrend * 2 + f.last10Freq * 1,
   }));
   const sorted = [...scored].sort((a, b) => b.score - a.score);
-  return { picks: sorted.slice(0, 7).map(f => f.number).sort((a, b) => a - b), pb: topPb(getPbFreqs(draws.slice(0, 20))) };
+  return { picks: sorted.slice(0, gc.mainCount).map(f => f.number).sort((a, b) => a - b), pb: topPb(getPbFreqs(draws.slice(0, 20))) };
 }
 
-function buildCompositeNoRecencyPick(draws: Draw[]): { picks: number[]; pb: number } {
-  if (draws.length === 0) return { picks: generateRandomCard(), pb: Math.floor(Math.random() * 20) + 1 };
-  const freqs = computeNumberFrequencies(draws);
+function buildCompositeNoRecencyPick(draws: Draw[], gc: GameConfig = DEFAULT_GAME_CONFIG): { picks: number[]; pb: number } {
+  if (draws.length === 0) return { picks: generateRandomCard(gc), pb: Math.floor(Math.random() * gc.specialPool) + 1 };
+  const freqs = computeNumberFrequencies(draws, gc);
   const scored = freqs.map(f => ({
     number: f.number,
     score: f.last25Freq * 2 + f.last10Freq * 3 + f.rollingTrend * 2,
   }));
   const sorted = [...scored].sort((a, b) => b.score - a.score);
-  return { picks: sorted.slice(0, 7).map(f => f.number).sort((a, b) => a - b), pb: topPb(getPbFreqs(draws.slice(0, 25))) };
+  return { picks: sorted.slice(0, gc.mainCount).map(f => f.number).sort((a, b) => a - b), pb: topPb(getPbFreqs(draws.slice(0, 25))) };
 }
 
-function buildCompositeNoStructurePick(draws: Draw[]): { picks: number[]; pb: number } {
-  if (draws.length === 0) return { picks: generateRandomCard(), pb: Math.floor(Math.random() * 20) + 1 };
-  const freqs = computeNumberFrequencies(draws);
+function buildCompositeNoStructurePick(draws: Draw[], gc: GameConfig = DEFAULT_GAME_CONFIG): { picks: number[]; pb: number } {
+  if (draws.length === 0) return { picks: generateRandomCard(gc), pb: Math.floor(Math.random() * gc.specialPool) + 1 };
+  const freqs = computeNumberFrequencies(draws, gc);
   const scored = freqs.map(f => ({
     number: f.number,
     score: f.last25Freq * 2 + f.last10Freq * 3 - f.drawsSinceSeen * 0.5 + f.rollingTrend * 2,
   }));
   const sorted = [...scored].sort((a, b) => b.score - a.score);
-  return { picks: sorted.slice(0, 7).map(f => f.number).sort((a, b) => a - b), pb: topPb(getPbFreqs(draws.slice(0, 25))) };
+  return { picks: sorted.slice(0, gc.mainCount).map(f => f.number).sort((a, b) => a - b), pb: topPb(getPbFreqs(draws.slice(0, 25))) };
 }
 
-function buildCompositeNoAntiPopPick(draws: Draw[]): { picks: number[]; pb: number } {
-  if (draws.length === 0) return { picks: generateRandomCard(), pb: Math.floor(Math.random() * 20) + 1 };
-  const freqs = computeNumberFrequencies(draws);
+function buildCompositeNoAntiPopPick(draws: Draw[], gc: GameConfig = DEFAULT_GAME_CONFIG): { picks: number[]; pb: number } {
+  if (draws.length === 0) return { picks: generateRandomCard(gc), pb: Math.floor(Math.random() * gc.specialPool) + 1 };
+  const freqs = computeNumberFrequencies(draws, gc);
   const scored = freqs.map(f => ({
     number: f.number,
     score: f.last25Freq * 2 + f.last10Freq * 3 - f.drawsSinceSeen * 0.5 + f.rollingTrend * 2,
   }));
   const sorted = [...scored].sort((a, b) => b.score - a.score);
-  return { picks: sorted.slice(0, 7).map(f => f.number).sort((a, b) => a - b), pb: topPb(getPbFreqs(draws.slice(0, 25))) };
+  return { picks: sorted.slice(0, gc.mainCount).map(f => f.number).sort((a, b) => a - b), pb: topPb(getPbFreqs(draws.slice(0, 25))) };
 }
 
-function buildCompositeStructureHeavyPick(draws: Draw[]): { picks: number[]; pb: number } {
-  if (draws.length === 0) return { picks: generateRandomCard(), pb: Math.floor(Math.random() * 20) + 1 };
-  const freqs = computeNumberFrequencies(draws);
-  const profile = computeStructureProfile(draws);
+function buildCompositeStructureHeavyPick(draws: Draw[], gc: GameConfig = DEFAULT_GAME_CONFIG): { picks: number[]; pb: number } {
+  if (draws.length === 0) return { picks: generateRandomCard(gc), pb: Math.floor(Math.random() * gc.specialPool) + 1 };
+  const freqs = computeNumberFrequencies(draws, gc);
+  const profile = computeStructureProfile(draws, gc);
   const scored = freqs.map(f => {
     const baseScore = f.last25Freq * 1 + f.last10Freq * 1 - f.drawsSinceSeen * 0.3 + f.rollingTrend * 1;
     return { number: f.number, score: baseScore };
   });
   const sorted = [...scored].sort((a, b) => b.score - a.score);
   const candidates = sorted.slice(0, 14).map(f => f.number);
-  const bestCombo = pickStructureMatchedFromCandidates(candidates, profile);
+  const bestCombo = pickStructureMatchedFromCandidates(candidates, profile, gc);
   return { picks: bestCombo, pb: topPb(getPbFreqs(draws.slice(0, 25))) };
 }
 
-function pickStructureMatchedFromCandidates(candidates: number[], profile: any): number[] {
-  if (candidates.length < 7) return candidates.slice(0, 7).sort((a, b) => a - b);
-  let bestPick = candidates.slice(0, 7);
+function pickStructureMatchedFromCandidates(candidates: number[], profile: any, gc: GameConfig = DEFAULT_GAME_CONFIG): number[] {
+  if (candidates.length < gc.mainCount) return candidates.slice(0, gc.mainCount).sort((a, b) => a - b);
+  let bestPick = candidates.slice(0, gc.mainCount);
   let bestFit = -Infinity;
   for (let attempt = 0; attempt < 200; attempt++) {
     const shuffled = [...candidates];
@@ -318,10 +338,10 @@ function pickStructureMatchedFromCandidates(candidates: number[], profile: any):
       const j = Math.floor(Math.random() * (i + 1));
       [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
     }
-    const pick = shuffled.slice(0, 7).sort((a, b) => a - b);
+    const pick = shuffled.slice(0, gc.mainCount).sort((a, b) => a - b);
     const oddCount = pick.filter(n => n % 2 === 1).length;
     const sum = pick.reduce((a, b) => a + b, 0);
-    const range = pick[6] - pick[0];
+    const range = pick[pick.length - 1] - pick[0];
     const targetOdd = profile?.oddEvenSplit?.mostCommonOddCount ?? 4;
     const targetSum = profile?.sumStats?.mean ?? 126;
     const targetRange = profile?.spreadStats?.mean ?? 28;
@@ -331,8 +351,9 @@ function pickStructureMatchedFromCandidates(candidates: number[], profile: any):
   return bestPick;
 }
 
-export function getGeneratorRecommendation(): GeneratorRecommendation {
-  if (!latestBenchmarkResult || latestBenchmarkResult.stabilityByStrategy.length === 0) {
+export function getGeneratorRecommendation(gameId?: string): GeneratorRecommendation {
+  const cached = benchmarkCache.get(gameId || DEFAULT_CACHE_KEY);
+  if (!cached || cached.result.stabilityByStrategy.length === 0) {
     return {
       recommendedMode: "balanced",
       recommendedStrategy: "Balanced",
@@ -344,7 +365,8 @@ export function getGeneratorRecommendation(): GeneratorRecommendation {
     };
   }
 
-  const benchmark = latestBenchmarkResult;
+  const benchmark = cached.result;
+  const cachedTime = cached.time;
   const stabilities = benchmark.stabilityByStrategy;
 
   const badges: Record<string, StabilityClass> = {};
@@ -363,7 +385,7 @@ export function getGeneratorRecommendation(): GeneratorRecommendation {
     bestAvgDelta: best.avgDelta,
     windowsTested: benchmark.windowSizesTested,
     strategiesTested: stabilities.length,
-    lastBenchmarkAt: latestBenchmarkTime!,
+    lastBenchmarkAt: cachedTime,
   };
 
   const regimeRecs = buildRegimeRecommendations(benchmark);
@@ -472,7 +494,7 @@ function buildRegimeRecommendations(benchmark: BenchmarkSummary): RegimeRecommen
 // Engine A: Pattern Discovery
 // ═══════════════════════════════════════════
 
-export function computeNumberFrequencies(draws: Draw[]): NumberFrequency[] {
+export function computeNumberFrequencies(draws: Draw[], gc: GameConfig = DEFAULT_GAME_CONFIG): NumberFrequency[] {
   if (draws.length === 0) return [];
   const frequencies: NumberFrequency[] = [];
   const last10 = draws.slice(0, Math.min(10, draws.length));
@@ -480,7 +502,7 @@ export function computeNumberFrequencies(draws: Draw[]): NumberFrequency[] {
   const last50 = draws.slice(0, Math.min(50, draws.length));
   const prior10 = draws.slice(Math.min(10, draws.length), Math.min(20, draws.length));
 
-  for (let n = 1; n <= 35; n++) {
+  for (let n = 1; n <= gc.mainPool; n++) {
     const totalFreq = draws.filter(d => (d.numbers as number[]).includes(n)).length;
     const f10 = last10.filter(d => (d.numbers as number[]).includes(n)).length;
     const f25 = last25.filter(d => (d.numbers as number[]).includes(n)).length;
@@ -509,13 +531,13 @@ export function computeNumberFrequencies(draws: Draw[]): NumberFrequency[] {
   return frequencies;
 }
 
-export function computePatternFeatures(draws: Draw[]): { structure: PatternFeatureRow[]; carryover: PatternFeatureRow[] } {
+export function computePatternFeatures(draws: Draw[], gc: GameConfig = DEFAULT_GAME_CONFIG): { structure: PatternFeatureRow[]; carryover: PatternFeatureRow[] } {
   if (draws.length === 0) return { structure: [], carryover: [] };
-  const structure = computeStructureFeatures(draws[0]);
+  const structure = computeStructureFeatures(draws[0], gc);
   const carryover = computeCarryoverFeatures(draws);
 
   if (draws.length >= 10) {
-    const historicalValues = computeHistoricalFeatureDistributions(draws.slice(1));
+    const historicalValues = computeHistoricalFeatureDistributions(draws.slice(1), gc);
     const allFeatures = [...structure, ...carryover];
     for (const f of allFeatures) {
       if (typeof f.value === "number" && historicalValues[f.feature]) {
@@ -533,15 +555,16 @@ export function computePatternFeatures(draws: Draw[]): { structure: PatternFeatu
   return { structure, carryover };
 }
 
-function computeHistoricalFeatureDistributions(draws: Draw[]): Record<string, number[]> {
+function computeHistoricalFeatureDistributions(draws: Draw[], gc: GameConfig = DEFAULT_GAME_CONFIG): Record<string, number[]> {
   const result: Record<string, number[]> = {};
+  const halfPool = Math.floor(gc.mainPool / 2);
   for (const draw of draws) {
     const nums = draw.numbers as number[];
     const sorted = [...nums].sort((a, b) => a - b);
     const oddCount = nums.filter(n => n % 2 !== 0).length;
     const sum = nums.reduce((a, b) => a + b, 0);
     const range = sorted[sorted.length - 1] - sorted[0];
-    const lowCount = nums.filter(n => n <= 17).length;
+    const lowCount = nums.filter(n => n <= halfPool).length;
 
     let consecutiveCount = 0;
     for (let i = 1; i < sorted.length; i++) {
@@ -553,13 +576,8 @@ function computeHistoricalFeatureDistributions(draws: Draw[]): Record<string, nu
     endings.forEach(e => { endingCounts[e] = (endingCounts[e] || 0) + 1; });
     const repeatedEndings = Object.values(endingCounts).filter(c => c > 1).length;
 
-    const decades: Record<string, number> = { "1-9": 0, "10-19": 0, "20-29": 0, "30-35": 0 };
-    nums.forEach(n => {
-      if (n < 10) decades["1-9"]++;
-      else if (n < 20) decades["10-19"]++;
-      else if (n < 30) decades["20-29"]++;
-      else decades["30-35"]++;
-    });
+    const decades = buildDecadeMap(gc.mainPool);
+    nums.forEach(n => classifyIntoDecade(n, decades));
 
     const push = (key: string, val: number) => {
       if (!result[key]) result[key] = [];
@@ -567,15 +585,14 @@ function computeHistoricalFeatureDistributions(draws: Draw[]): Record<string, nu
     };
 
     push("odd_count", oddCount);
-    push("even_count", 7 - oddCount);
+    push("even_count", gc.mainCount - oddCount);
     push("sum", sum);
     push("range", range);
     push("consecutive_count", consecutiveCount);
     push("repeated_endings", repeatedEndings);
-    push("decade_1_9", decades["1-9"]);
-    push("decade_10_19", decades["10-19"]);
-    push("decade_20_29", decades["20-29"]);
-    push("decade_30_35", decades["30-35"]);
+    for (const [decKey, decVal] of Object.entries(decades)) {
+      push(`decade_${decKey.replace("-", "_")}`, decVal);
+    }
   }
 
   if (draws.length >= 2) {
@@ -623,15 +640,16 @@ function quantile(dist: number[], q: number): number {
   return Math.round(sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo));
 }
 
-function computeStructureFeatures(draw: Draw): PatternFeatureRow[] {
+function computeStructureFeatures(draw: Draw, gc: GameConfig = DEFAULT_GAME_CONFIG): PatternFeatureRow[] {
   const nums = draw.numbers as number[];
   const sorted = [...nums].sort((a, b) => a - b);
   const oddCount = nums.filter(n => n % 2 !== 0).length;
   const evenCount = nums.filter(n => n % 2 === 0).length;
   const sum = nums.reduce((a, b) => a + b, 0);
   const range = sorted[sorted.length - 1] - sorted[0];
-  const lowCount = nums.filter(n => n <= 17).length;
-  const highCount = nums.filter(n => n > 17).length;
+  const halfPool = Math.floor(gc.mainPool / 2);
+  const lowCount = nums.filter(n => n <= halfPool).length;
+  const highCount = nums.filter(n => n > halfPool).length;
 
   let consecutiveCount = 0;
   for (let i = 1; i < sorted.length; i++) {
@@ -643,15 +661,10 @@ function computeStructureFeatures(draw: Draw): PatternFeatureRow[] {
   endings.forEach(e => { endingCounts[e] = (endingCounts[e] || 0) + 1; });
   const repeatedEndings = Object.values(endingCounts).filter(c => c > 1).length;
 
-  const decades: Record<string, number> = { "1-9": 0, "10-19": 0, "20-29": 0, "30-35": 0 };
-  nums.forEach(n => {
-    if (n < 10) decades["1-9"]++;
-    else if (n < 20) decades["10-19"]++;
-    else if (n < 30) decades["20-29"]++;
-    else decades["30-35"]++;
-  });
+  const decades = buildDecadeMap(gc.mainPool);
+  nums.forEach(n => classifyIntoDecade(n, decades));
 
-  return [
+  const features: PatternFeatureRow[] = [
     { feature: "odd_count", value: oddCount, type: "structure" },
     { feature: "even_count", value: evenCount, type: "structure" },
     { feature: "sum", value: sum, type: "structure" },
@@ -659,11 +672,13 @@ function computeStructureFeatures(draw: Draw): PatternFeatureRow[] {
     { feature: "low_high_split", value: `${lowCount}/${highCount}`, type: "structure" },
     { feature: "consecutive_count", value: consecutiveCount, type: "structure" },
     { feature: "repeated_endings", value: repeatedEndings, type: "structure" },
-    { feature: "decade_1_9", value: decades["1-9"], type: "structure" },
-    { feature: "decade_10_19", value: decades["10-19"], type: "structure" },
-    { feature: "decade_20_29", value: decades["20-29"], type: "structure" },
-    { feature: "decade_30_35", value: decades["30-35"], type: "structure" },
   ];
+
+  for (const [decKey, decVal] of Object.entries(decades)) {
+    features.push({ feature: `decade_${decKey.replace("-", "_")}`, value: decVal, type: "structure" });
+  }
+
+  return features;
 }
 
 function computeCarryoverFeatures(draws: Draw[]): PatternFeatureRow[] {
@@ -685,11 +700,12 @@ function computeCarryoverFeatures(draws: Draw[]): PatternFeatureRow[] {
   return features;
 }
 
-export function computeStructureProfile(draws: Draw[]): StructureProfile {
+export function computeStructureProfile(draws: Draw[], gc: GameConfig = DEFAULT_GAME_CONFIG): StructureProfile {
   if (draws.length < 5) {
     return { oddEvenMode: "N/A", sumMedian: 0, sumQ10: 0, sumQ90: 0, rangeMedian: 0, rangeQ10: 0, rangeQ90: 0, lowHighMode: "N/A", avgCarryover: 0, avgConsecutive: 0, drawsAnalyzed: 0 };
   }
 
+  const halfPool = Math.floor(gc.mainPool / 2);
   const oddCounts: number[] = [];
   const sums: number[] = [];
   const ranges: number[] = [];
@@ -703,7 +719,7 @@ export function computeStructureProfile(draws: Draw[]): StructureProfile {
     oddCounts.push(nums.filter(n => n % 2 !== 0).length);
     sums.push(nums.reduce((a, b) => a + b, 0));
     ranges.push(sorted[sorted.length - 1] - sorted[0]);
-    lowCounts.push(nums.filter(n => n <= 17).length);
+    lowCounts.push(nums.filter(n => n <= halfPool).length);
 
     let consec = 0;
     for (let j = 1; j < sorted.length; j++) {
@@ -727,14 +743,14 @@ export function computeStructureProfile(draws: Draw[]): StructureProfile {
   const lowMode = mode(lowCounts);
 
   return {
-    oddEvenMode: `${oddMode} odd / ${7 - oddMode} even`,
+    oddEvenMode: `${oddMode} odd / ${gc.mainCount - oddMode} even`,
     sumMedian: quantile(sums, 0.5),
     sumQ10: quantile(sums, 0.1),
     sumQ90: quantile(sums, 0.9),
     rangeMedian: quantile(ranges, 0.5),
     rangeQ10: quantile(ranges, 0.1),
     rangeQ90: quantile(ranges, 0.9),
-    lowHighMode: `${lowMode} low / ${7 - lowMode} high`,
+    lowHighMode: `${lowMode} low / ${gc.mainCount - lowMode} high`,
     avgCarryover: carryovers.length > 0 ? Number((carryovers.reduce((a, b) => a + b, 0) / carryovers.length).toFixed(1)) : 0,
     avgConsecutive: Number((consecutives.reduce((a, b) => a + b, 0) / consecutives.length).toFixed(1)),
     drawsAnalyzed: draws.length,
@@ -745,11 +761,11 @@ export function computeStructureProfile(draws: Draw[]): StructureProfile {
 // Randomness Audit
 // ═══════════════════════════════════════════
 
-export function runRandomnessAudit(draws: Draw[]): AuditSummary {
-  return runRandomnessAuditMain(draws);
+export function runRandomnessAudit(draws: Draw[], gc: GameConfig = DEFAULT_GAME_CONFIG): AuditSummary {
+  return runRandomnessAuditMain(draws, gc);
 }
 
-export function runRandomnessAuditMain(draws: Draw[]): AuditSummary {
+export function runRandomnessAuditMain(draws: Draw[], gc: GameConfig = DEFAULT_GAME_CONFIG): AuditSummary {
   if (draws.length < 20) {
     return {
       chiSquareStat: 0, chiSquarePValue: 1, entropyScore: 0, maxEntropy: 0,
@@ -759,21 +775,21 @@ export function runRandomnessAuditMain(draws: Draw[]): AuditSummary {
     };
   }
 
-  const observed: number[] = new Array(35).fill(0);
+  const observed: number[] = new Array(gc.mainPool).fill(0);
   for (const d of draws) {
     for (const n of d.numbers as number[]) {
       observed[n - 1]++;
     }
   }
-  const totalBalls = draws.length * 7;
-  const expected = totalBalls / 35;
+  const totalBalls = draws.length * gc.mainCount;
+  const expected = totalBalls / gc.mainPool;
 
   let chiSquare = 0;
-  for (let i = 0; i < 35; i++) {
+  for (let i = 0; i < gc.mainPool; i++) {
     chiSquare += Math.pow(observed[i] - expected, 2) / expected;
   }
 
-  const df = 34;
+  const df = gc.mainPool - 1;
   const pValue = 1 - chiSquaredCDF(chiSquare, df);
 
   const probs = observed.map(o => o / totalBalls);
@@ -781,7 +797,7 @@ export function runRandomnessAuditMain(draws: Draw[]): AuditSummary {
   for (const p of probs) {
     if (p > 0) entropy -= p * Math.log2(p);
   }
-  const maxEntropy = Math.log2(35);
+  const maxEntropy = Math.log2(gc.mainPool);
   const entropyRatio = entropy / maxEntropy;
 
   let verdict: "pass" | "marginal" | "fail";
@@ -791,7 +807,7 @@ export function runRandomnessAuditMain(draws: Draw[]): AuditSummary {
   if (pValue > 0.05 && entropyRatio > 0.95) {
     verdict = "pass";
     details = "Main number distribution appears consistent with random draws. No significant deviations detected.";
-    interpretation = "The frequencies of main numbers (1-35) are statistically consistent with uniform random selection. No exploitable pattern detected.";
+    interpretation = `The frequencies of main numbers (1-${gc.mainPool}) are statistically consistent with uniform random selection. No exploitable pattern detected.`;
   } else if (pValue > 0.01 && entropyRatio > 0.90) {
     verdict = "marginal";
     details = "Minor deviations from uniform distribution detected in main numbers. Could be natural variance or a weak signal worth monitoring.";
@@ -812,7 +828,7 @@ export function runRandomnessAuditMain(draws: Draw[]): AuditSummary {
   };
 }
 
-export function runRandomnessAuditPowerball(draws: Draw[]): AuditSummary {
+export function runRandomnessAuditPowerball(draws: Draw[], gc: GameConfig = DEFAULT_GAME_CONFIG): AuditSummary {
   if (draws.length < 20) {
     return {
       chiSquareStat: 0, chiSquarePValue: 1, entropyScore: 0, maxEntropy: 0,
@@ -822,19 +838,19 @@ export function runRandomnessAuditPowerball(draws: Draw[]): AuditSummary {
     };
   }
 
-  const observed: number[] = new Array(20).fill(0);
+  const observed: number[] = new Array(gc.specialPool).fill(0);
   for (const d of draws) {
     observed[d.powerball - 1]++;
   }
   const totalBalls = draws.length;
-  const expected = totalBalls / 20;
+  const expected = totalBalls / gc.specialPool;
 
   let chiSquare = 0;
-  for (let i = 0; i < 20; i++) {
+  for (let i = 0; i < gc.specialPool; i++) {
     chiSquare += Math.pow(observed[i] - expected, 2) / expected;
   }
 
-  const df = 19;
+  const df = gc.specialPool - 1;
   const pValue = 1 - chiSquaredCDF(chiSquare, df);
 
   const probs = observed.map(o => o / totalBalls);
@@ -842,7 +858,7 @@ export function runRandomnessAuditPowerball(draws: Draw[]): AuditSummary {
   for (const p of probs) {
     if (p > 0) entropy -= p * Math.log2(p);
   }
-  const maxEntropy = Math.log2(20);
+  const maxEntropy = Math.log2(gc.specialPool);
   const entropyRatio = entropy / maxEntropy;
 
   let verdict: "pass" | "marginal" | "fail";
@@ -851,16 +867,16 @@ export function runRandomnessAuditPowerball(draws: Draw[]): AuditSummary {
 
   if (pValue > 0.05 && entropyRatio > 0.95) {
     verdict = "pass";
-    details = "Powerball distribution appears consistent with random draws. No significant deviations detected.";
-    interpretation = "Powerball frequencies (1-20) are statistically consistent with uniform random selection.";
+    details = `${gc.specialName} distribution appears consistent with random draws. No significant deviations detected.`;
+    interpretation = `${gc.specialName} frequencies (1-${gc.specialPool}) are statistically consistent with uniform random selection.`;
   } else if (pValue > 0.01 && entropyRatio > 0.90) {
     verdict = "marginal";
-    details = "Minor deviations from uniform distribution detected in Powerball numbers.";
-    interpretation = "Some Powerball values appear slightly more or less often than expected. This is within normal statistical fluctuation and does not imply predictability.";
+    details = `Minor deviations from uniform distribution detected in ${gc.specialName} numbers.`;
+    interpretation = `Some ${gc.specialName} values appear slightly more or less often than expected. This is within normal statistical fluctuation and does not imply predictability.`;
   } else {
     verdict = "fail";
-    details = "Significant deviation from uniform distribution in Powerball numbers.";
-    interpretation = "The Powerball frequency distribution differs significantly from uniform randomness. This is a statistical observation — it does not mean Powerball draws are predictable.";
+    details = `Significant deviation from uniform distribution in ${gc.specialName} numbers.`;
+    interpretation = `The ${gc.specialName} frequency distribution differs significantly from uniform randomness. This is a statistical observation — it does not mean ${gc.specialName} draws are predictable.`;
   }
 
   return {
@@ -929,11 +945,11 @@ function lnGamma(z: number): number {
 // Engine B: Validation
 // ═══════════════════════════════════════════
 
-export function runWalkForwardValidation(draws: Draw[]): ValidationSummary {
+export function runWalkForwardValidation(draws: Draw[], gc: GameConfig = DEFAULT_GAME_CONFIG): ValidationSummary {
   if (draws.length < 50) {
     return {
       verdict: "insufficient_data",
-      verdictExplanation: `Only ${draws.length} modern draws available. Need at least 50 for meaningful walk-forward validation. Upload more data or check that your CSV contains modern format (7+1) draws.`,
+      verdictExplanation: `Only ${draws.length} modern draws available. Need at least 50 for meaningful walk-forward validation. Upload more data or check that your CSV contains modern format (${gc.mainCount}+1) draws.`,
       byStrategy: [],
       rollingWindows: [],
       diagnostics: {
@@ -976,82 +992,82 @@ export function runWalkForwardValidation(draws: Draw[]): ValidationSummary {
   }
 
   const randomResult = scoreStrategy("Random", () => ({
-    picks: generateRandomCard(),
-    pb: Math.floor(Math.random() * 20) + 1,
+    picks: generateRandomCard(gc),
+    pb: Math.floor(Math.random() * gc.specialPool) + 1,
   }));
 
   const freqResult = scoreStrategy("Frequency Only", (train) => {
-    const freqs = computeNumberFrequencies(train);
+    const freqs = computeNumberFrequencies(train, gc);
     const sorted = [...freqs].sort((a, b) => b.totalFreq - a.totalFreq);
-    const picks = sorted.slice(0, 7).map(f => f.number).sort((a, b) => a - b);
+    const picks = sorted.slice(0, gc.mainCount).map(f => f.number).sort((a, b) => a - b);
     const pbFreqs = getPbFreqs(train);
     return { picks, pb: topPb(pbFreqs) };
   });
 
   const recencyResult = scoreStrategy("Recency Only", (train) => {
-    const freqs = computeNumberFrequencies(train);
+    const freqs = computeNumberFrequencies(train, gc);
     const sorted = [...freqs].sort((a, b) => a.drawsSinceSeen - b.drawsSinceSeen);
-    const picks = sorted.slice(0, 7).map(f => f.number).sort((a, b) => a - b);
+    const picks = sorted.slice(0, gc.mainCount).map(f => f.number).sort((a, b) => a - b);
     return { picks, pb: train[0]?.powerball || 1 };
   });
 
   const structureResult = scoreStrategy("Structure-Aware Random", (train) => {
-    const card = generateStructureAwareCard(train);
-    return { picks: card, pb: Math.floor(Math.random() * 20) + 1 };
+    const card = generateStructureAwareCard(train, gc);
+    return { picks: card, pb: Math.floor(Math.random() * gc.specialPool) + 1 };
   });
 
   const compositeResult = scoreStrategy("Composite Model", (train) => {
-    const freqs = computeNumberFrequencies(train);
+    const freqs = computeNumberFrequencies(train, gc);
     const scored = freqs.map(f => ({
       number: f.number,
       score: f.last25Freq * 2 + f.last10Freq * 3 - f.drawsSinceSeen * 0.5 + f.rollingTrend * 2,
     }));
     const sorted = [...scored].sort((a, b) => b.score - a.score);
-    const picks = sorted.slice(0, 7).map(f => f.number).sort((a, b) => a - b);
+    const picks = sorted.slice(0, gc.mainCount).map(f => f.number).sort((a, b) => a - b);
     const pbFreqs = getPbFreqs(train.slice(0, 25));
     return { picks, pb: topPb(pbFreqs) };
   });
 
   const mostDrawnAllTime = scoreStrategy("Most Drawn (All-Time)", (train) => {
-    return buildMostDrawnPick(train, train.length);
+    return buildMostDrawnPick(train, train.length, gc);
   });
 
   const mostDrawnLast50 = scoreStrategy("Most Drawn (Last 50)", (train) => {
-    return buildMostDrawnPick(train, 50);
+    return buildMostDrawnPick(train, 50, gc);
   });
 
   const mostDrawnLast100 = scoreStrategy("Most Drawn (Last 100)", (train) => {
-    return buildMostDrawnPick(train, 100);
+    return buildMostDrawnPick(train, 100, gc);
   });
 
   const mostDrawnLast20 = scoreStrategy("Most Drawn (Last 20)", (train) => {
-    return buildMostDrawnPick(train, 20);
+    return buildMostDrawnPick(train, 20, gc);
   });
 
   const leastDrawnLast50 = scoreStrategy("Least Drawn (Last 50)", (train) => {
-    return buildLeastDrawnPick(train, 50);
+    return buildLeastDrawnPick(train, 50, gc);
   });
 
   const structureMatchedResult = scoreStrategy("Structure-Matched Random", (train) => {
-    return { picks: generateStructureMatchedCard(train), pb: Math.floor(Math.random() * 20) + 1 };
+    return { picks: generateStructureMatchedCard(train, gc), pb: Math.floor(Math.random() * gc.specialPool) + 1 };
   });
 
   const antiPopularResult = scoreStrategy("Anti-Popular Only", () => {
-    return generateAntiPopularPick();
+    return generateAntiPopularPick(gc);
   });
 
   const diversityResult = scoreStrategy("Diversity Optimized", (train) => {
-    const freqs = computeNumberFrequencies(train);
+    const freqs = computeNumberFrequencies(train, gc);
     const scored = freqs.map(f => ({
       number: f.number,
       score: f.last25Freq * 2 + f.last10Freq * 3 - f.drawsSinceSeen * 0.5 + f.rollingTrend * 2,
     }));
-    return { picks: weightedSample(scored, 7), pb: Math.floor(Math.random() * 20) + 1 };
+    return { picks: weightedSample(scored, gc.mainCount), pb: Math.floor(Math.random() * gc.specialPool) + 1 };
   });
 
   const strategies = [randomResult, freqResult, recencyResult, structureResult, compositeResult, mostDrawnAllTime, mostDrawnLast50, mostDrawnLast100, mostDrawnLast20, leastDrawnLast50, structureMatchedResult, antiPopularResult, diversityResult];
 
-  const rollingWindows = computeRollingWindows(draws);
+  const rollingWindows = computeRollingWindows(draws, gc);
 
   const delta = compositeResult.avgMainMatches - randomResult.avgMainMatches;
   let verdict: ValidationVerdict;
@@ -1089,130 +1105,130 @@ export function runWalkForwardValidation(draws: Draw[]): ValidationSummary {
 
 type StrategyFn = (trainDraws: Draw[]) => { picks: number[]; pb: number };
 
-function getStrategyRegistry(): { name: string; fn: StrategyFn }[] {
+function getStrategyRegistry(gc: GameConfig = DEFAULT_GAME_CONFIG): { name: string; fn: StrategyFn }[] {
   return [
     {
       name: "Random",
-      fn: () => ({ picks: generateRandomCard(), pb: Math.floor(Math.random() * 20) + 1 }),
+      fn: () => ({ picks: generateRandomCard(gc), pb: Math.floor(Math.random() * gc.specialPool) + 1 }),
     },
     {
       name: "Frequency Only",
       fn: (train) => {
-        const freqs = computeNumberFrequencies(train);
+        const freqs = computeNumberFrequencies(train, gc);
         const sorted = [...freqs].sort((a, b) => b.totalFreq - a.totalFreq);
-        return { picks: sorted.slice(0, 7).map(f => f.number).sort((a, b) => a - b), pb: topPb(getPbFreqs(train)) };
+        return { picks: sorted.slice(0, gc.mainCount).map(f => f.number).sort((a, b) => a - b), pb: topPb(getPbFreqs(train)) };
       },
     },
     {
       name: "Recency Only",
       fn: (train) => {
-        const freqs = computeNumberFrequencies(train);
+        const freqs = computeNumberFrequencies(train, gc);
         const sorted = [...freqs].sort((a, b) => a.drawsSinceSeen - b.drawsSinceSeen);
-        return { picks: sorted.slice(0, 7).map(f => f.number).sort((a, b) => a - b), pb: train[0]?.powerball || 1 };
+        return { picks: sorted.slice(0, gc.mainCount).map(f => f.number).sort((a, b) => a - b), pb: train[0]?.powerball || 1 };
       },
     },
     {
       name: "Structure-Aware",
-      fn: (train) => ({ picks: generateStructureAwareCard(train), pb: Math.floor(Math.random() * 20) + 1 }),
+      fn: (train) => ({ picks: generateStructureAwareCard(train, gc), pb: Math.floor(Math.random() * gc.specialPool) + 1 }),
     },
     {
       name: "Composite",
       fn: (train) => {
-        const freqs = computeNumberFrequencies(train);
+        const freqs = computeNumberFrequencies(train, gc);
         const scored = freqs.map(f => ({
           number: f.number,
           score: f.last25Freq * 2 + f.last10Freq * 3 - f.drawsSinceSeen * 0.5 + f.rollingTrend * 2,
         }));
         const sorted = [...scored].sort((a, b) => b.score - a.score);
-        return { picks: sorted.slice(0, 7).map(f => f.number).sort((a, b) => a - b), pb: topPb(getPbFreqs(train.slice(0, 25))) };
+        return { picks: sorted.slice(0, gc.mainCount).map(f => f.number).sort((a, b) => a - b), pb: topPb(getPbFreqs(train.slice(0, 25))) };
       },
     },
     {
       name: "Most Drawn (All-Time)",
-      fn: (train) => buildMostDrawnPick(train, train.length),
+      fn: (train) => buildMostDrawnPick(train, train.length, gc),
     },
     {
       name: "Most Drawn (Last 50)",
-      fn: (train) => buildMostDrawnPick(train, 50),
+      fn: (train) => buildMostDrawnPick(train, 50, gc),
     },
     {
       name: "Most Drawn (Last 100)",
-      fn: (train) => buildMostDrawnPick(train, 100),
+      fn: (train) => buildMostDrawnPick(train, 100, gc),
     },
     {
       name: "Most Drawn (Last 20)",
-      fn: (train) => buildMostDrawnPick(train, 20),
+      fn: (train) => buildMostDrawnPick(train, 20, gc),
     },
     {
       name: "Least Drawn (Last 50)",
-      fn: (train) => buildLeastDrawnPick(train, 50),
+      fn: (train) => buildLeastDrawnPick(train, 50, gc),
     },
     {
       name: "Structure-Matched Random",
-      fn: (train) => ({ picks: generateStructureMatchedCard(train), pb: Math.floor(Math.random() * 20) + 1 }),
+      fn: (train) => ({ picks: generateStructureMatchedCard(train, gc), pb: Math.floor(Math.random() * gc.specialPool) + 1 }),
     },
     {
       name: "Anti-Popular Only",
-      fn: () => generateAntiPopularPick(),
+      fn: () => generateAntiPopularPick(gc),
     },
     {
       name: "Diversity Optimized",
       fn: (train) => {
-        const freqs = computeNumberFrequencies(train);
+        const freqs = computeNumberFrequencies(train, gc);
         const scored = freqs.map(f => ({
           number: f.number,
           score: f.last25Freq * 2 + f.last10Freq * 3 - f.drawsSinceSeen * 0.5 + f.rollingTrend * 2,
         }));
-        return { picks: weightedSample(scored, 7), pb: Math.floor(Math.random() * 20) + 1 };
+        return { picks: weightedSample(scored, gc.mainCount), pb: Math.floor(Math.random() * gc.specialPool) + 1 };
       },
     },
     {
       name: "Smoothed Most Drawn (L50)",
-      fn: (train) => buildSmoothedPick(train, 50),
+      fn: (train) => buildSmoothedPick(train, 50, 0.3, gc),
     },
     {
       name: "Smoothed Most Drawn (L20)",
-      fn: (train) => buildSmoothedPick(train, 20),
+      fn: (train) => buildSmoothedPick(train, 20, 0.3, gc),
     },
     {
       name: "Recency Smoothed",
-      fn: (train) => buildRecencySmoothedPick(train),
+      fn: (train) => buildRecencySmoothedPick(train, 0.3, gc),
     },
     {
       name: "Recency Gap Balanced",
-      fn: (train) => buildRecencyGapBalancedPick(train),
+      fn: (train) => buildRecencyGapBalancedPick(train, gc),
     },
     {
       name: "Recency Decay Weighted",
-      fn: (train) => buildRecencyDecayWeightedPick(train),
+      fn: (train) => buildRecencyDecayWeightedPick(train, 0.05, gc),
     },
     {
       name: "Recency Short Window",
-      fn: (train) => buildRecencyShortWindowPick(train),
+      fn: (train) => buildRecencyShortWindowPick(train, 15, gc),
     },
     {
       name: "Composite No-Frequency",
-      fn: (train) => buildCompositeNoFrequencyPick(train),
+      fn: (train) => buildCompositeNoFrequencyPick(train, gc),
     },
     {
       name: "Composite Recency-Heavy",
-      fn: (train) => buildCompositeRecencyHeavyPick(train),
+      fn: (train) => buildCompositeRecencyHeavyPick(train, gc),
     },
     {
       name: "Composite No-Recency",
-      fn: (train) => buildCompositeNoRecencyPick(train),
+      fn: (train) => buildCompositeNoRecencyPick(train, gc),
     },
     {
       name: "Composite No-Structure",
-      fn: (train) => buildCompositeNoStructurePick(train),
+      fn: (train) => buildCompositeNoStructurePick(train, gc),
     },
     {
       name: "Composite No-AntiPop",
-      fn: (train) => buildCompositeNoAntiPopPick(train),
+      fn: (train) => buildCompositeNoAntiPopPick(train, gc),
     },
     {
       name: "Composite Structure-Heavy",
-      fn: (train) => buildCompositeStructureHeavyPick(train),
+      fn: (train) => buildCompositeStructureHeavyPick(train, gc),
     },
   ];
 }
@@ -1229,9 +1245,10 @@ export function runBenchmarkValidation(
   selectedStrategies?: string[],
   presetName?: string,
   permutationStrategies?: string[],
-  regimeSplits: boolean = false
+  regimeSplits: boolean = false,
+  gc: GameConfig = DEFAULT_GAME_CONFIG
 ): BenchmarkSummary {
-  const allStrategies = getStrategyRegistry();
+  const allStrategies = getStrategyRegistry(gc);
   const strategies = selectedStrategies && selectedStrategies.length > 0
     ? allStrategies.filter(s => selectedStrategies.includes(s.name) || s.name === "Random")
     : allStrategies;
@@ -1264,7 +1281,7 @@ export function runBenchmarkValidation(
       let total = 0;
       for (const testDraw of testDraws) {
         const actual = testDraw.numbers as number[];
-        const card = seededRandomCard(ensembleRng);
+        const card = seededRandomCard(ensembleRng, gc);
         total += card.filter(n => actual.includes(n)).length;
       }
       ensembleAvgs.push(total / testDraws.length);
@@ -1351,7 +1368,7 @@ export function runBenchmarkValidation(
   for (let run = 0; run < randomBaselineRuns; run++) {
     let total = 0;
     for (const td of firstTestDraws) {
-      total += seededRandomCard(ensembleRng2).filter(n => (td.numbers as number[]).includes(n)).length;
+      total += seededRandomCard(ensembleRng2, gc).filter(n => (td.numbers as number[]).includes(n)).length;
     }
     allEnsembleAvgs.push(total / firstTestDraws.length);
   }
@@ -1440,7 +1457,7 @@ export function runBenchmarkValidation(
 
         let randTotal = 0;
         for (const td of pTest) {
-          randTotal += seededRandomCard(permRng).filter(n => (td.numbers as number[]).includes(n)).length;
+          randTotal += seededRandomCard(permRng, gc).filter(n => (td.numbers as number[]).includes(n)).length;
         }
         const randAvg = randTotal / pTest.length;
         nullDeltas.push(permAvg - randAvg);
@@ -1496,7 +1513,7 @@ export function runBenchmarkValidation(
       const rWindows = windowSizes.filter(w => rDraws.length >= w + Math.min(minTrainDraws, Math.floor(rDraws.length * 0.4)));
       if (rWindows.length === 0) continue;
       const rMinTrain = Math.min(minTrainDraws, Math.floor(rDraws.length * 0.4));
-      const rResult = runBenchmarkValidation(rDraws, rWindows, rMinTrain, benchmarkMode, seed, Math.min(randomBaselineRuns, 100), false, 0, selectedStrategies, undefined, undefined, false);
+      const rResult = runBenchmarkValidation(rDraws, rWindows, rMinTrain, benchmarkMode, seed, Math.min(randomBaselineRuns, 100), false, 0, selectedStrategies, undefined, undefined, false, gc);
       const firstDate = rDraws[rDraws.length - 1]?.drawDate || "?";
       const lastDate = rDraws[0]?.drawDate || "?";
       regimeSplitResults.push({
@@ -1525,7 +1542,7 @@ export function runBenchmarkValidation(
   };
 }
 
-function computeRollingWindows(draws: Draw[]): RollingWindow[] {
+function computeRollingWindows(draws: Draw[], gc: GameConfig = DEFAULT_GAME_CONFIG): RollingWindow[] {
   const windowSize = 25;
   const windows: RollingWindow[] = [];
   if (draws.length < windowSize + 10) return windows;
@@ -1541,16 +1558,16 @@ function computeRollingWindows(draws: Draw[]): RollingWindow[] {
     for (const testDraw of testSlice) {
       const actual = testDraw.numbers as number[];
 
-      const freqs = computeNumberFrequencies(trainSlice);
+      const freqs = computeNumberFrequencies(trainSlice, gc);
       const scored = freqs.map(f => ({
         number: f.number,
         score: f.last25Freq * 2 + f.last10Freq * 3 - f.drawsSinceSeen * 0.5 + f.rollingTrend * 2,
       }));
       const sorted = [...scored].sort((a, b) => b.score - a.score);
-      const compositePicks = sorted.slice(0, 7).map(f => f.number);
+      const compositePicks = sorted.slice(0, gc.mainCount).map(f => f.number);
       compositeTotal += compositePicks.filter(n => actual.includes(n)).length;
 
-      const randomPicks = generateRandomCard();
+      const randomPicks = generateRandomCard(gc);
       randomTotal += randomPicks.filter(n => actual.includes(n)).length;
     }
 
@@ -1569,12 +1586,12 @@ function computeRollingWindows(draws: Draw[]): RollingWindow[] {
   return windows;
 }
 
-function buildMostDrawnPick(draws: Draw[], windowSize: number): { picks: number[]; pb: number } {
+function buildMostDrawnPick(draws: Draw[], windowSize: number, gc: GameConfig = DEFAULT_GAME_CONFIG): { picks: number[]; pb: number } {
   const window = draws.slice(0, Math.min(windowSize, draws.length));
-  if (window.length === 0) return { picks: generateRandomCard(), pb: Math.floor(Math.random() * 20) + 1 };
+  if (window.length === 0) return { picks: generateRandomCard(gc), pb: Math.floor(Math.random() * gc.specialPool) + 1 };
 
   const mainCounts: { number: number; count: number; lastSeen: number }[] = [];
-  for (let n = 1; n <= 35; n++) {
+  for (let n = 1; n <= gc.mainPool; n++) {
     let count = 0;
     let lastSeen = window.length;
     for (let i = 0; i < window.length; i++) {
@@ -1586,10 +1603,10 @@ function buildMostDrawnPick(draws: Draw[], windowSize: number): { picks: number[
     mainCounts.push({ number: n, count, lastSeen });
   }
   mainCounts.sort((a, b) => b.count - a.count || a.lastSeen - b.lastSeen || a.number - b.number);
-  const picks = mainCounts.slice(0, 7).map(m => m.number).sort((a, b) => a - b);
+  const picks = mainCounts.slice(0, gc.mainCount).map(m => m.number).sort((a, b) => a - b);
 
   const pbCounts: { number: number; count: number; lastSeen: number }[] = [];
-  for (let n = 1; n <= 20; n++) {
+  for (let n = 1; n <= gc.specialPool; n++) {
     let count = 0;
     let lastSeen = window.length;
     for (let i = 0; i < window.length; i++) {
@@ -1606,12 +1623,12 @@ function buildMostDrawnPick(draws: Draw[], windowSize: number): { picks: number[
   return { picks, pb };
 }
 
-function generateMostDrawnCards(draws: Draw[], windowSize: number, count: number): GeneratedPick[] {
+function generateMostDrawnCards(draws: Draw[], windowSize: number, count: number, gc: GameConfig = DEFAULT_GAME_CONFIG): GeneratedPick[] {
   const window = draws.slice(0, Math.min(windowSize, draws.length));
   if (window.length === 0) return [];
 
   const mainCounts: { number: number; count: number; lastSeen: number }[] = [];
-  for (let n = 1; n <= 35; n++) {
+  for (let n = 1; n <= gc.mainPool; n++) {
     let count = 0;
     let lastSeen = window.length;
     for (let i = 0; i < window.length; i++) {
@@ -1625,7 +1642,7 @@ function generateMostDrawnCards(draws: Draw[], windowSize: number, count: number
   mainCounts.sort((a, b) => b.count - a.count || a.lastSeen - b.lastSeen || a.number - b.number);
 
   const pbCounts: { number: number; count: number; lastSeen: number }[] = [];
-  for (let n = 1; n <= 20; n++) {
+  for (let n = 1; n <= gc.specialPool; n++) {
     let count = 0;
     let lastSeen = window.length;
     for (let i = 0; i < window.length; i++) {
@@ -1638,7 +1655,7 @@ function generateMostDrawnCards(draws: Draw[], windowSize: number, count: number
   }
   pbCounts.sort((a, b) => b.count - a.count || a.lastSeen - b.lastSeen || a.number - b.number);
 
-  const mainPool = Math.min(18, mainCounts.length);
+  const mainPoolSize = Math.min(18, mainCounts.length);
   const pbPool = Math.min(10, pbCounts.length);
   const candidates: GeneratedPick[] = [];
   const seen = new Set<string>();
@@ -1648,12 +1665,12 @@ function generateMostDrawnCards(draws: Draw[], windowSize: number, count: number
     let pb: number;
 
     if (attempt === 0) {
-      card = mainCounts.slice(0, 7).map(m => m.number).sort((a, b) => a - b);
+      card = mainCounts.slice(0, gc.mainCount).map(m => m.number).sort((a, b) => a - b);
       pb = pbCounts[0]?.number ?? 1;
     } else {
-      const poolSlice = mainCounts.slice(0, mainPool);
-      const weights = poolSlice.map((m, i) => ({ number: m.number, score: mainPool - i + m.count }));
-      card = weightedSample(weights, 7);
+      const poolSlice = mainCounts.slice(0, mainPoolSize);
+      const weights = poolSlice.map((m, i) => ({ number: m.number, score: mainPoolSize - i + m.count }));
+      card = weightedSample(weights, gc.mainCount);
       const pbIdx = Math.floor(Math.random() * Math.min(pbPool, pbCounts.length));
       pb = pbCounts[pbIdx]?.number ?? 1;
     }
@@ -1663,9 +1680,9 @@ function generateMostDrawnCards(draws: Draw[], windowSize: number, count: number
     seen.add(key);
 
     const { score: antiPop, breakdown } = scoreAntiPopularity(card, pb);
-    const topMainSet = new Set(mainCounts.slice(0, 7).map(m => m.number));
+    const topMainSet = new Set(mainCounts.slice(0, gc.mainCount).map(m => m.number));
     const overlapCount = card.filter(n => topMainSet.has(n)).length;
-    const drawFit = Math.round((overlapCount / 7) * 100);
+    const drawFit = Math.round((overlapCount / gc.mainCount) * 100);
     const finalScore = (drawFit * 60 + antiPop * 40) / 100;
 
     candidates.push({
@@ -1683,12 +1700,12 @@ function generateMostDrawnCards(draws: Draw[], windowSize: number, count: number
   return candidates.slice(0, count).map((c, i) => ({ ...c, rank: i + 1 }));
 }
 
-function buildLeastDrawnPick(draws: Draw[], windowSize: number): { picks: number[]; pb: number } {
+function buildLeastDrawnPick(draws: Draw[], windowSize: number, gc: GameConfig = DEFAULT_GAME_CONFIG): { picks: number[]; pb: number } {
   const window = draws.slice(0, Math.min(windowSize, draws.length));
-  if (window.length === 0) return { picks: generateRandomCard(), pb: Math.floor(Math.random() * 20) + 1 };
+  if (window.length === 0) return { picks: generateRandomCard(gc), pb: Math.floor(Math.random() * gc.specialPool) + 1 };
 
   const mainCounts: { number: number; count: number; lastSeen: number }[] = [];
-  for (let n = 1; n <= 35; n++) {
+  for (let n = 1; n <= gc.mainPool; n++) {
     let count = 0;
     let lastSeen = window.length;
     for (let i = 0; i < window.length; i++) {
@@ -1700,10 +1717,10 @@ function buildLeastDrawnPick(draws: Draw[], windowSize: number): { picks: number
     mainCounts.push({ number: n, count, lastSeen });
   }
   mainCounts.sort((a, b) => a.count - b.count || b.lastSeen - a.lastSeen || a.number - b.number);
-  const picks = mainCounts.slice(0, 7).map(m => m.number).sort((a, b) => a - b);
+  const picks = mainCounts.slice(0, gc.mainCount).map(m => m.number).sort((a, b) => a - b);
 
   const pbCounts: { number: number; count: number; lastSeen: number }[] = [];
-  for (let n = 1; n <= 20; n++) {
+  for (let n = 1; n <= gc.specialPool; n++) {
     let count = 0;
     let lastSeen = window.length;
     for (let i = 0; i < window.length; i++) {
@@ -1720,9 +1737,10 @@ function buildLeastDrawnPick(draws: Draw[], windowSize: number): { picks: number
   return { picks, pb };
 }
 
-function generateStructureMatchedCard(draws: Draw[]): number[] {
-  if (draws.length < 5) return generateRandomCard();
+function generateStructureMatchedCard(draws: Draw[], gc: GameConfig = DEFAULT_GAME_CONFIG): number[] {
+  if (draws.length < 5) return generateRandomCard(gc);
 
+  const halfPool = Math.floor(gc.mainPool / 2);
   const sampleSize = Math.min(draws.length, 100);
   let avgOdd = 0;
   let avgSum = 0;
@@ -1733,7 +1751,7 @@ function generateStructureMatchedCard(draws: Draw[]): number[] {
     const sorted = [...nums].sort((a, b) => a - b);
     avgOdd += nums.filter(n => n % 2 !== 0).length;
     avgSum += nums.reduce((a, b) => a + b, 0);
-    avgLow += nums.filter(n => n <= 17).length;
+    avgLow += nums.filter(n => n <= halfPool).length;
     avgRange += sorted[sorted.length - 1] - sorted[0];
   }
   avgOdd = Math.round(avgOdd / sampleSize);
@@ -1741,14 +1759,14 @@ function generateStructureMatchedCard(draws: Draw[]): number[] {
   avgLow = Math.round(avgLow / sampleSize);
   avgRange = Math.round(avgRange / sampleSize);
 
-  let bestCard = generateRandomCard();
+  let bestCard = generateRandomCard(gc);
   let bestFit = Infinity;
 
   for (let attempt = 0; attempt < 200; attempt++) {
-    const card = generateRandomCard();
+    const card = generateRandomCard(gc);
     const odd = card.filter(n => n % 2 !== 0).length;
     const sum = card.reduce((a, b) => a + b, 0);
-    const low = card.filter(n => n <= 17).length;
+    const low = card.filter(n => n <= halfPool).length;
     const range = card[card.length - 1] - card[0];
 
     const fit = Math.abs(odd - avgOdd) + Math.abs(sum - avgSum) / 15 + Math.abs(low - avgLow) + Math.abs(range - avgRange) / 5;
@@ -1761,14 +1779,14 @@ function generateStructureMatchedCard(draws: Draw[]): number[] {
   return bestCard;
 }
 
-function generateAntiPopularPick(): { picks: number[]; pb: number } {
-  let bestCard = generateRandomCard();
-  let bestPb = Math.floor(Math.random() * 20) + 1;
+function generateAntiPopularPick(gc: GameConfig = DEFAULT_GAME_CONFIG): { picks: number[]; pb: number } {
+  let bestCard = generateRandomCard(gc);
+  let bestPb = Math.floor(Math.random() * gc.specialPool) + 1;
   let bestScore = -1;
 
   for (let attempt = 0; attempt < 200; attempt++) {
-    const card = generateRandomCard();
-    const pb = Math.floor(Math.random() * 13) + 8;
+    const card = generateRandomCard(gc);
+    const pb = Math.floor(Math.random() * Math.max(1, gc.specialPool - 7)) + 8;
     const { score } = scoreAntiPopularity(card, pb);
     if (score > bestScore) {
       bestScore = score;
@@ -1779,8 +1797,8 @@ function generateAntiPopularPick(): { picks: number[]; pb: number } {
   return { picks: bestCard, pb: bestPb };
 }
 
-function generateDiverseCards(draws: Draw[], count: number): GeneratedPick[] {
-  const freqs = computeNumberFrequencies(draws);
+function generateDiverseCards(draws: Draw[], count: number, gc: GameConfig = DEFAULT_GAME_CONFIG): GeneratedPick[] {
+  const freqs = computeNumberFrequencies(draws, gc);
   const scored = freqs.map(f => ({
     number: f.number,
     score: f.last25Freq * 2 + f.last10Freq * 3 - f.drawsSinceSeen * 0.5 + f.rollingTrend * 2,
@@ -1795,22 +1813,22 @@ function generateDiverseCards(draws: Draw[], count: number): GeneratedPick[] {
     let pb: number;
 
     if (attempt % 3 === 0) {
-      card = weightedSample(scored, 7);
+      card = weightedSample(scored, gc.mainCount);
       const pbEntries = Object.entries(pbFreqs).sort(([, a], [, b]) => b - a);
-      pb = pbEntries.length > 0 ? Number(pbEntries[Math.floor(Math.random() * Math.min(5, pbEntries.length))][0]) : Math.floor(Math.random() * 20) + 1;
+      pb = pbEntries.length > 0 ? Number(pbEntries[Math.floor(Math.random() * Math.min(5, pbEntries.length))][0]) : Math.floor(Math.random() * gc.specialPool) + 1;
     } else if (attempt % 3 === 1) {
-      card = generateStructureMatchedCard(draws);
-      pb = Math.floor(Math.random() * 20) + 1;
+      card = generateStructureMatchedCard(draws, gc);
+      pb = Math.floor(Math.random() * gc.specialPool) + 1;
     } else {
-      card = generateRandomCard();
-      pb = Math.floor(Math.random() * 20) + 1;
+      card = generateRandomCard(gc);
+      pb = Math.floor(Math.random() * gc.specialPool) + 1;
     }
 
     const key = card.join(",") + ":" + pb;
     if (seen.has(key)) continue;
     seen.add(key);
 
-    const drawFit = computeDrawFitScore(card, scored);
+    const drawFit = computeDrawFitScore(card, scored, gc);
     const { score: antiPop, breakdown } = scoreAntiPopularity(card, pb);
     const finalScore = (drawFit * 50 + antiPop * 50) / 100;
 
@@ -1859,13 +1877,13 @@ function generateDiverseCards(draws: Draw[], count: number): GeneratedPick[] {
   return selected.map((c, i) => ({ ...c, rank: i + 1 }));
 }
 
-function generateAntiPopularCards(count: number): GeneratedPick[] {
+function generateAntiPopularCards(count: number, gc: GameConfig = DEFAULT_GAME_CONFIG): GeneratedPick[] {
   const candidates: GeneratedPick[] = [];
   const seen = new Set<string>();
 
   for (let attempt = 0; attempt < count * 100 && candidates.length < count * 5; attempt++) {
-    const card = generateRandomCard();
-    const pb = Math.floor(Math.random() * 13) + 8;
+    const card = generateRandomCard(gc);
+    const pb = Math.floor(Math.random() * Math.max(1, gc.specialPool - 7)) + 8;
     const key = card.join(",") + ":" + pb;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -1886,8 +1904,8 @@ function generateAntiPopularCards(count: number): GeneratedPick[] {
   return candidates.slice(0, count).map((c, i) => ({ ...c, rank: i + 1 }));
 }
 
-function generateStructureMatchedCards(draws: Draw[], count: number): GeneratedPick[] {
-  const freqs = computeNumberFrequencies(draws);
+function generateStructureMatchedCards(draws: Draw[], count: number, gc: GameConfig = DEFAULT_GAME_CONFIG): GeneratedPick[] {
+  const freqs = computeNumberFrequencies(draws, gc);
   const scored = freqs.map(f => ({
     number: f.number,
     score: f.last25Freq * 2 + f.last10Freq * 3 - f.drawsSinceSeen * 0.5 + f.rollingTrend * 2,
@@ -1897,13 +1915,13 @@ function generateStructureMatchedCards(draws: Draw[], count: number): GeneratedP
   const seen = new Set<string>();
 
   for (let attempt = 0; attempt < count * 50 && candidates.length < count * 3; attempt++) {
-    const card = generateStructureMatchedCard(draws);
-    const pb = Math.floor(Math.random() * 20) + 1;
+    const card = generateStructureMatchedCard(draws, gc);
+    const pb = Math.floor(Math.random() * gc.specialPool) + 1;
     const key = card.join(",") + ":" + pb;
     if (seen.has(key)) continue;
     seen.add(key);
 
-    const drawFit = computeDrawFitScore(card, scored);
+    const drawFit = computeDrawFitScore(card, scored, gc);
     const { score: antiPop, breakdown } = scoreAntiPopularity(card, pb);
     const finalScore = (drawFit * 60 + antiPop * 40) / 100;
 
@@ -1922,12 +1940,12 @@ function generateStructureMatchedCards(draws: Draw[], count: number): GeneratedP
   return candidates.slice(0, count).map((c, i) => ({ ...c, rank: i + 1 }));
 }
 
-function generateLeastDrawnCards(draws: Draw[], windowSize: number, count: number): GeneratedPick[] {
+function generateLeastDrawnCards(draws: Draw[], windowSize: number, count: number, gc: GameConfig = DEFAULT_GAME_CONFIG): GeneratedPick[] {
   const window = draws.slice(0, Math.min(windowSize, draws.length));
   if (window.length === 0) return [];
 
   const mainCounts: { number: number; count: number; lastSeen: number }[] = [];
-  for (let n = 1; n <= 35; n++) {
+  for (let n = 1; n <= gc.mainPool; n++) {
     let count = 0;
     let lastSeen = window.length;
     for (let i = 0; i < window.length; i++) {
@@ -1941,7 +1959,7 @@ function generateLeastDrawnCards(draws: Draw[], windowSize: number, count: numbe
   mainCounts.sort((a, b) => a.count - b.count || b.lastSeen - a.lastSeen || a.number - b.number);
 
   const pbCounts: { number: number; count: number; lastSeen: number }[] = [];
-  for (let n = 1; n <= 20; n++) {
+  for (let n = 1; n <= gc.specialPool; n++) {
     let count = 0;
     let lastSeen = window.length;
     for (let i = 0; i < window.length; i++) {
@@ -1954,7 +1972,7 @@ function generateLeastDrawnCards(draws: Draw[], windowSize: number, count: numbe
   }
   pbCounts.sort((a, b) => a.count - b.count || b.lastSeen - a.lastSeen || a.number - b.number);
 
-  const mainPool = Math.min(18, mainCounts.length);
+  const mainPoolSize = Math.min(18, mainCounts.length);
   const pbPool = Math.min(10, pbCounts.length);
   const candidates: GeneratedPick[] = [];
   const seen = new Set<string>();
@@ -1964,12 +1982,12 @@ function generateLeastDrawnCards(draws: Draw[], windowSize: number, count: numbe
     let pb: number;
 
     if (attempt === 0) {
-      card = mainCounts.slice(0, 7).map(m => m.number).sort((a, b) => a - b);
+      card = mainCounts.slice(0, gc.mainCount).map(m => m.number).sort((a, b) => a - b);
       pb = pbCounts[0]?.number ?? 1;
     } else {
-      const poolSlice = mainCounts.slice(0, mainPool);
-      const weights = poolSlice.map((m, i) => ({ number: m.number, score: mainPool - i + (mainPool - m.count) }));
-      card = weightedSample(weights, 7);
+      const poolSlice = mainCounts.slice(0, mainPoolSize);
+      const weights = poolSlice.map((m, i) => ({ number: m.number, score: mainPoolSize - i + (mainPoolSize - m.count) }));
+      card = weightedSample(weights, gc.mainCount);
       const pbIdx = Math.floor(Math.random() * Math.min(pbPool, pbCounts.length));
       pb = pbCounts[pbIdx]?.number ?? 1;
     }
@@ -1979,9 +1997,9 @@ function generateLeastDrawnCards(draws: Draw[], windowSize: number, count: numbe
     seen.add(key);
 
     const { score: antiPop, breakdown } = scoreAntiPopularity(card, pb);
-    const topMainSet = new Set(mainCounts.slice(0, 7).map(m => m.number));
+    const topMainSet = new Set(mainCounts.slice(0, gc.mainCount).map(m => m.number));
     const overlapCount = card.filter(n => topMainSet.has(n)).length;
-    const drawFit = Math.round((overlapCount / 7) * 100);
+    const drawFit = Math.round((overlapCount / gc.mainCount) * 100);
     const finalScore = (drawFit * 60 + antiPop * 40) / 100;
 
     candidates.push({
@@ -1999,8 +2017,8 @@ function generateLeastDrawnCards(draws: Draw[], windowSize: number, count: numbe
   return candidates.slice(0, count).map((c, i) => ({ ...c, rank: i + 1 }));
 }
 
-function generateStructureAwareCard(draws: Draw[]): number[] {
-  if (draws.length < 5) return generateRandomCard();
+function generateStructureAwareCard(draws: Draw[], gc: GameConfig = DEFAULT_GAME_CONFIG): number[] {
+  if (draws.length < 5) return generateRandomCard(gc);
 
   let avgOdd = 0;
   let avgSum = 0;
@@ -2014,14 +2032,14 @@ function generateStructureAwareCard(draws: Draw[]): number[] {
   avgSum = Math.round(avgSum / sampleSize);
 
   for (let attempt = 0; attempt < 100; attempt++) {
-    const card = generateRandomCard();
+    const card = generateRandomCard(gc);
     const odd = card.filter(n => n % 2 !== 0).length;
     const sum = card.reduce((a, b) => a + b, 0);
     if (Math.abs(odd - avgOdd) <= 1 && Math.abs(sum - avgSum) <= 20) {
       return card;
     }
   }
-  return generateRandomCard();
+  return generateRandomCard(gc);
 }
 
 function getPbFreqs(draws: Draw[]): Record<number, number> {
@@ -2035,10 +2053,10 @@ function topPb(freqs: Record<number, number>): number {
   return entries.length > 0 ? Number(entries[0][0]) : 1;
 }
 
-function generateRandomCard(): number[] {
-  const pool = Array.from({ length: 35 }, (_, i) => i + 1);
+function generateRandomCard(gc: GameConfig = DEFAULT_GAME_CONFIG): number[] {
+  const pool = Array.from({ length: gc.mainPool }, (_, i) => i + 1);
   const picked: number[] = [];
-  for (let i = 0; i < 7; i++) {
+  for (let i = 0; i < gc.mainCount; i++) {
     const idx = Math.floor(Math.random() * pool.length);
     picked.push(pool.splice(idx, 1)[0]);
   }
@@ -2098,10 +2116,10 @@ export function scoreAntiPopularity(numbers: number[], powerball: number): { sco
   };
 }
 
-export function generateSmoothedCards(draws: Draw[], windowSize: number, count: number): GeneratedPick[] {
+export function generateSmoothedCards(draws: Draw[], windowSize: number, count: number, gc: GameConfig = DEFAULT_GAME_CONFIG): GeneratedPick[] {
   const candidates: GeneratedPick[] = [];
   const seen = new Set<string>();
-  const basePick = buildSmoothedPick(draws, windowSize);
+  const basePick = buildSmoothedPick(draws, windowSize, 0.3, gc);
 
   for (let attempt = 0; attempt < count * 30 && candidates.length < count; attempt++) {
     let card: number[];
@@ -2112,18 +2130,18 @@ export function generateSmoothedCards(draws: Draw[], windowSize: number, count: 
       pb = basePick.pb;
     } else {
       const window = draws.slice(0, Math.min(windowSize, draws.length));
-      const uniform = 1 / 35;
+      const uniform = 1 / gc.mainPool;
       const alpha = 0.3;
       const smoothed: { number: number; score: number }[] = [];
-      for (let n = 1; n <= 35; n++) {
+      for (let n = 1; n <= gc.mainPool; n++) {
         const count_ = window.filter(d => (d.numbers as number[]).includes(n)).length;
         const observed = count_ / Math.max(window.length, 1);
         smoothed.push({ number: n, score: alpha * uniform + (1 - alpha) * observed });
       }
-      card = weightedSample(smoothed.map(s => ({ number: s.number, score: s.score * 1000 })), 7);
+      card = weightedSample(smoothed.map(s => ({ number: s.number, score: s.score * 1000 })), gc.mainCount);
       const pbFreqs = getPbFreqs(window);
       const pbEntries = Object.entries(pbFreqs).sort(([, a], [, b]) => b - a);
-      pb = pbEntries.length > 0 ? Number(pbEntries[Math.floor(Math.random() * Math.min(5, pbEntries.length))][0]) : Math.floor(Math.random() * 20) + 1;
+      pb = pbEntries.length > 0 ? Number(pbEntries[Math.floor(Math.random() * Math.min(5, pbEntries.length))][0]) : Math.floor(Math.random() * gc.specialPool) + 1;
     }
 
     const key = card.join(",") + ":" + pb;
@@ -2132,7 +2150,7 @@ export function generateSmoothedCards(draws: Draw[], windowSize: number, count: 
 
     const { score: antiPop, breakdown } = scoreAntiPopularity(card, pb);
     const overlap = card.filter(n => basePick.picks.includes(n)).length;
-    const drawFit = Math.round((overlap / 7) * 100);
+    const drawFit = Math.round((overlap / gc.mainCount) * 100);
     const finalScore = (drawFit * 60 + antiPop * 40) / 100;
 
     candidates.push({
@@ -2147,10 +2165,10 @@ export function generateSmoothedCards(draws: Draw[], windowSize: number, count: 
   return candidates.slice(0, count).map((c, i) => ({ ...c, rank: i + 1 }));
 }
 
-export function generateRecencySmoothedCards(draws: Draw[], count: number): GeneratedPick[] {
+export function generateRecencySmoothedCards(draws: Draw[], count: number, gc: GameConfig = DEFAULT_GAME_CONFIG): GeneratedPick[] {
   const candidates: GeneratedPick[] = [];
   const seen = new Set<string>();
-  const basePick = buildRecencySmoothedPick(draws);
+  const basePick = buildRecencySmoothedPick(draws, 0.3, gc);
 
   for (let attempt = 0; attempt < count * 30 && candidates.length < count; attempt++) {
     let card: number[];
@@ -2160,10 +2178,10 @@ export function generateRecencySmoothedCards(draws: Draw[], count: number): Gene
       card = basePick.picks;
       pb = basePick.pb;
     } else {
-      const uniform = 1 / 35;
+      const uniform = 1 / gc.mainPool;
       const alpha = 0.3;
       const scored: { number: number; score: number }[] = [];
-      for (let n = 1; n <= 35; n++) {
+      for (let n = 1; n <= gc.mainPool; n++) {
         let dss = draws.length;
         for (let i = 0; i < draws.length; i++) {
           if ((draws[i].numbers as number[]).includes(n)) { dss = i; break; }
@@ -2171,8 +2189,8 @@ export function generateRecencySmoothedCards(draws: Draw[], count: number): Gene
         const rec = 1 - (dss / draws.length);
         scored.push({ number: n, score: (alpha * uniform + (1 - alpha) * rec) * 1000 });
       }
-      card = weightedSample(scored, 7);
-      pb = draws[0]?.powerball || Math.floor(Math.random() * 20) + 1;
+      card = weightedSample(scored, gc.mainCount);
+      pb = draws[0]?.powerball || Math.floor(Math.random() * gc.specialPool) + 1;
     }
 
     const key = card.join(",") + ":" + pb;
@@ -2181,7 +2199,7 @@ export function generateRecencySmoothedCards(draws: Draw[], count: number): Gene
 
     const { score: antiPop, breakdown } = scoreAntiPopularity(card, pb);
     const overlap = card.filter(n => basePick.picks.includes(n)).length;
-    const drawFit = Math.round((overlap / 7) * 100);
+    const drawFit = Math.round((overlap / gc.mainCount) * 100);
     const finalScore = (drawFit * 60 + antiPop * 40) / 100;
 
     candidates.push({
@@ -2196,24 +2214,25 @@ export function generateRecencySmoothedCards(draws: Draw[], count: number): Gene
   return candidates.slice(0, count).map((c, i) => ({ ...c, rank: i + 1 }));
 }
 
-export function generateStrategyPortfolio(draws: Draw[], count: number = 10, allocationMethod: "equal" | "validation_weighted" = "equal"): GeneratedPick[] {
+export function generateStrategyPortfolio(draws: Draw[], count: number = 10, allocationMethod: "equal" | "validation_weighted" = "equal", gc: GameConfig = DEFAULT_GAME_CONFIG, gameId?: string): GeneratedPick[] {
   const categories: { label: string; fn: (train: Draw[]) => { picks: number[]; pb: number }; slots: number }[] = [
-    { label: "Most Drawn (All-Time)", fn: (t) => buildMostDrawnPick(t, t.length), slots: 2 },
-    { label: "Smoothed Most Drawn (L50)", fn: (t) => buildSmoothedPick(t, 50), slots: 1 },
-    { label: "Recency Smoothed", fn: (t) => buildRecencySmoothedPick(t), slots: 1 },
-    { label: "Structure-Matched Random", fn: (t) => ({ picks: generateStructureMatchedCard(t), pb: Math.floor(Math.random() * 20) + 1 }), slots: 2 },
-    { label: "Anti-Popular Only", fn: () => generateAntiPopularPick(), slots: 2 },
+    { label: "Most Drawn (All-Time)", fn: (t) => buildMostDrawnPick(t, t.length, gc), slots: 2 },
+    { label: "Smoothed Most Drawn (L50)", fn: (t) => buildSmoothedPick(t, 50, 0.3, gc), slots: 1 },
+    { label: "Recency Smoothed", fn: (t) => buildRecencySmoothedPick(t, 0.3, gc), slots: 1 },
+    { label: "Structure-Matched Random", fn: (t) => ({ picks: generateStructureMatchedCard(t, gc), pb: Math.floor(Math.random() * gc.specialPool) + 1 }), slots: 2 },
+    { label: "Anti-Popular Only", fn: () => generateAntiPopularPick(gc), slots: 2 },
     { label: "Composite", fn: (t) => {
-      const freqs = computeNumberFrequencies(t);
+      const freqs = computeNumberFrequencies(t, gc);
       const scored = freqs.map(f => ({ number: f.number, score: f.last25Freq * 2 + f.last10Freq * 3 - f.drawsSinceSeen * 0.5 + f.rollingTrend * 2 }));
       const sorted = [...scored].sort((a, b) => b.score - a.score);
-      return { picks: sorted.slice(0, 7).map(f => f.number).sort((a, b) => a - b), pb: topPb(getPbFreqs(t.slice(0, 25))) };
+      return { picks: sorted.slice(0, gc.mainCount).map(f => f.number).sort((a, b) => a - b), pb: topPb(getPbFreqs(t.slice(0, 25))) };
     }, slots: 1 },
-    { label: "Random Baseline", fn: () => ({ picks: generateRandomCard(), pb: Math.floor(Math.random() * 20) + 1 }), slots: 1 },
+    { label: "Random Baseline", fn: () => ({ picks: generateRandomCard(gc), pb: Math.floor(Math.random() * gc.specialPool) + 1 }), slots: 1 },
   ];
 
-  if (allocationMethod === "validation_weighted" && latestBenchmarkResult) {
-    const stabilities = latestBenchmarkResult.stabilityByStrategy;
+  const cachedBenchmark = benchmarkCache.get(gameId || DEFAULT_CACHE_KEY);
+  if (allocationMethod === "validation_weighted" && cachedBenchmark) {
+    const stabilities = cachedBenchmark.result.stabilityByStrategy;
     for (const cat of categories) {
       const stability = stabilities.find(s => s.strategy === cat.label);
       if (stability) {
@@ -2251,9 +2270,9 @@ export function generateStrategyPortfolio(draws: Draw[], count: number = 10, all
         for (const n of picks) overlapPenalty += (usedNumbers.get(n) || 0) * 3;
 
         const { score: antiPop, breakdown } = scoreAntiPopularity(picks, pb);
-        const freqs = computeNumberFrequencies(draws);
+        const freqs = computeNumberFrequencies(draws, gc);
         const scored = freqs.map(f => ({ number: f.number, score: f.last25Freq * 2 + f.last10Freq * 3 - f.drawsSinceSeen * 0.5 + f.rollingTrend * 2 }));
-        const drawFit = computeDrawFitScore(picks, scored);
+        const drawFit = computeDrawFitScore(picks, scored, gc);
         const finalScore = (drawFit * 50 + antiPop * 50) / 100;
         const diversityScore = finalScore - overlapPenalty;
 
@@ -2287,11 +2306,12 @@ export function generateRankedPicks(
   draws: Draw[],
   count: number = 10,
   drawFitWeight: number = 60,
-  antiPopWeight: number = 40
+  antiPopWeight: number = 40,
+  gc: GameConfig = DEFAULT_GAME_CONFIG
 ): GeneratedPick[] {
   if (draws.length === 0) return [];
 
-  const freqs = computeNumberFrequencies(draws);
+  const freqs = computeNumberFrequencies(draws, gc);
   const scored = freqs.map(f => ({
     number: f.number,
     score: f.last25Freq * 2 + f.last10Freq * 3 - f.drawsSinceSeen * 0.5 + f.rollingTrend * 2,
@@ -2307,26 +2327,26 @@ export function generateRankedPicks(
     let pb: number;
 
     if (attempt % 4 === 0) {
-      card = weightedSample(scored, 7);
+      card = weightedSample(scored, gc.mainCount);
       const pbEntries = Object.entries(pbFreqs).sort(([, a], [, b]) => b - a);
-      pb = pbEntries.length > 0 ? Number(pbEntries[Math.floor(Math.random() * Math.min(5, pbEntries.length))][0]) : Math.floor(Math.random() * 20) + 1;
+      pb = pbEntries.length > 0 ? Number(pbEntries[Math.floor(Math.random() * Math.min(5, pbEntries.length))][0]) : Math.floor(Math.random() * gc.specialPool) + 1;
     } else if (attempt % 4 === 1) {
       const topNumbers = [...scored].sort((a, b) => b.score - a.score).slice(0, 15);
-      card = weightedSample(topNumbers, 7);
-      pb = Math.floor(Math.random() * 20) + 1;
+      card = weightedSample(topNumbers, gc.mainCount);
+      pb = Math.floor(Math.random() * gc.specialPool) + 1;
     } else if (attempt % 4 === 2) {
-      card = generateStructureAwareCard(draws);
-      pb = Math.floor(Math.random() * 20) + 1;
+      card = generateStructureAwareCard(draws, gc);
+      pb = Math.floor(Math.random() * gc.specialPool) + 1;
     } else {
-      card = generateRandomCard();
-      pb = Math.floor(Math.random() * 20) + 1;
+      card = generateRandomCard(gc);
+      pb = Math.floor(Math.random() * gc.specialPool) + 1;
     }
 
     const key = card.join(",") + ":" + pb;
     if (seen.has(key)) continue;
     seen.add(key);
 
-    const drawFit = computeDrawFitScore(card, scored);
+    const drawFit = computeDrawFitScore(card, scored, gc);
     const { score: antiPop, breakdown } = scoreAntiPopularity(card, pb);
     const finalScore = (drawFit * drawFitWeight + antiPop * antiPopWeight) / 100;
 
@@ -2366,10 +2386,11 @@ function weightedSample(scored: { number: number; score: number }[], count: numb
   return picked.sort((a, b) => a - b);
 }
 
-function computeDrawFitScore(card: number[], scored: { number: number; score: number }[]): number {
+function computeDrawFitScore(card: number[], scored: { number: number; score: number }[], gc: GameConfig = DEFAULT_GAME_CONFIG): number {
   const scoreMap = new Map(scored.map(s => [s.number, s.score]));
-  const maxPossible = [...scored].sort((a, b) => b.score - a.score).slice(0, 7).reduce((sum, s) => sum + s.score, 0);
+  const maxPossible = [...scored].sort((a, b) => b.score - a.score).slice(0, gc.mainCount).reduce((sum, s) => sum + s.score, 0);
   const actual = card.reduce((sum, n) => sum + (scoreMap.get(n) || 0), 0);
   if (maxPossible <= 0) return 50;
   return Math.min(100, Math.max(0, (actual / maxPossible) * 100));
 }
+

@@ -10,8 +10,10 @@ import {
   type FormulaPermutationResult,
   type FormulaLabResult,
   type StabilityClass,
+  type GameConfig,
 } from "@shared/schema";
 import { computeNumberFrequencies, scoreAntiPopularity } from "./analysis";
+import { DEFAULT_GAME_CONFIG } from "./storage";
 
 const DEFAULT_FEATURES: FormulaFeatureConfig = {
   freqTotal: true,
@@ -73,7 +75,8 @@ function computeNumberFeatures(
 function computeCardFeatures(
   card: number[],
   trainDraws: Draw[],
-  features: FormulaFeatureConfig
+  features: FormulaFeatureConfig,
+  gc: GameConfig = DEFAULT_GAME_CONFIG
 ): Record<string, number> {
   const result: Record<string, number> = {};
 
@@ -97,11 +100,11 @@ function computeCardFeatures(
   if (features.carryoverAffinity && trainDraws.length >= 1) {
     const prevNums = trainDraws[0].numbers as number[];
     const overlap = card.filter(n => prevNums.includes(n)).length;
-    result.carryoverAffinity = overlap / 7;
+    result.carryoverAffinity = overlap / gc.mainCount;
   }
 
   if (features.antiPopularity) {
-    const pb = Math.floor(Math.random() * 20) + 1;
+    const pb = Math.floor(Math.random() * gc.specialPool) + 1;
     const { score } = scoreAntiPopularity(card, pb);
     result.antiPopularity = score / 100;
   }
@@ -119,21 +122,21 @@ function scoreNumber(number: number, trainDraws: Draw[], weights: FormulaWeights
   return score;
 }
 
-export function generateFormulaCard(trainDraws: Draw[], weights: FormulaWeights, features: FormulaFeatureConfig): { picks: number[]; pb: number; formulaScore: number } {
+export function generateFormulaCard(trainDraws: Draw[], weights: FormulaWeights, features: FormulaFeatureConfig, gc: GameConfig = DEFAULT_GAME_CONFIG): { picks: number[]; pb: number; formulaScore: number } {
   const scored: { number: number; score: number }[] = [];
-  for (let n = 1; n <= 35; n++) {
+  for (let n = 1; n <= gc.mainPool; n++) {
     scored.push({ number: n, score: scoreNumber(n, trainDraws, weights, features) });
   }
   scored.sort((a, b) => b.score - a.score);
-  const top7 = scored.slice(0, 7);
-  const picks = top7.map(s => s.number).sort((a, b) => a - b);
-  const formulaScore = top7.reduce((sum, s) => sum + s.score, 0) / top7.length;
+  const topN = scored.slice(0, gc.mainCount);
+  const picks = topN.map(s => s.number).sort((a, b) => a - b);
+  const formulaScore = topN.reduce((sum, s) => sum + s.score, 0) / topN.length;
 
   const pbScores: { number: number; score: number }[] = [];
   const pbFreqs: Record<number, number> = {};
   const pb50 = trainDraws.slice(0, Math.min(50, trainDraws.length));
   pb50.forEach(d => { pbFreqs[d.powerball] = (pbFreqs[d.powerball] || 0) + 1; });
-  for (let n = 1; n <= 20; n++) {
+  for (let n = 1; n <= gc.specialPool; n++) {
     pbScores.push({ number: n, score: pbFreqs[n] || 0 });
   }
   pbScores.sort((a, b) => b.score - a.score);
@@ -143,24 +146,24 @@ export function generateFormulaCard(trainDraws: Draw[], weights: FormulaWeights,
 }
 
 export function generateDiverseFormulaCard(
-  trainDraws: Draw[], weights: FormulaWeights, features: FormulaFeatureConfig, rng: () => number, noiseLevel: number = 0.5
+  trainDraws: Draw[], weights: FormulaWeights, features: FormulaFeatureConfig, rng: () => number, noiseLevel: number = 0.5, gc: GameConfig = DEFAULT_GAME_CONFIG
 ): { picks: number[]; pb: number; formulaScore: number } {
   const scored: { number: number; score: number; baseScore: number }[] = [];
-  for (let n = 1; n <= 35; n++) {
+  for (let n = 1; n <= gc.mainPool; n++) {
     const base = scoreNumber(n, trainDraws, weights, features);
     const noise = (rng() - 0.5) * 2 * noiseLevel * Math.abs(base + 1);
     scored.push({ number: n, score: base + noise, baseScore: base });
   }
   scored.sort((a, b) => b.score - a.score);
-  const top7 = scored.slice(0, 7);
-  const picks = top7.map(s => s.number).sort((a, b) => a - b);
-  const formulaScore = top7.reduce((sum, s) => sum + s.baseScore, 0) / top7.length;
+  const topN = scored.slice(0, gc.mainCount);
+  const picks = topN.map(s => s.number).sort((a, b) => a - b);
+  const formulaScore = topN.reduce((sum, s) => sum + s.baseScore, 0) / topN.length;
 
   const pbFreqs: Record<number, number> = {};
   const pb50 = trainDraws.slice(0, Math.min(50, trainDraws.length));
   pb50.forEach(d => { pbFreqs[d.powerball] = (pbFreqs[d.powerball] || 0) + 1; });
   const pbScored: { number: number; score: number }[] = [];
-  for (let n = 1; n <= 20; n++) {
+  for (let n = 1; n <= gc.specialPool; n++) {
     pbScored.push({ number: n, score: (pbFreqs[n] || 0) + (rng() - 0.5) * 2 * noiseLevel });
   }
   pbScored.sort((a, b) => b.score - a.score);
@@ -173,7 +176,8 @@ function evaluateFormula(
   trainDraws: Draw[],
   testDraws: Draw[],
   weights: FormulaWeights,
-  features: FormulaFeatureConfig
+  features: FormulaFeatureConfig,
+  gc: GameConfig = DEFAULT_GAME_CONFIG
 ): { avgMainMatches: number; bestMainMatches: number; pbHits: number } {
   let totalMain = 0;
   let bestMain = 0;
@@ -182,7 +186,7 @@ function evaluateFormula(
   for (const testDraw of testDraws) {
     const actual = testDraw.numbers as number[];
     const actualPB = testDraw.powerball;
-    const { picks, pb } = generateFormulaCard(trainDraws, weights, features);
+    const { picks, pb } = generateFormulaCard(trainDraws, weights, features, gc);
     const mainMatches = picks.filter(n => actual.includes(n)).length;
     totalMain += mainMatches;
     bestMain = Math.max(bestMain, mainMatches);
@@ -225,10 +229,10 @@ function computeComplexityPenalty(weights: FormulaWeights, features: FormulaFeat
   return strength * (activeCount * 0.1 + totalMagnitude * 0.02);
 }
 
-function generateRandomCard(): number[] {
-  const pool = Array.from({ length: 35 }, (_, i) => i + 1);
+function generateRandomCard(gc: GameConfig = DEFAULT_GAME_CONFIG): number[] {
+  const pool = Array.from({ length: gc.mainPool }, (_, i) => i + 1);
   const picked: number[] = [];
-  for (let i = 0; i < 7; i++) {
+  for (let i = 0; i < gc.mainCount; i++) {
     const idx = Math.floor(Math.random() * pool.length);
     picked.push(pool.splice(idx, 1)[0]);
   }
@@ -237,7 +241,8 @@ function generateRandomCard(): number[] {
 
 export function runFormulaOptimizer(
   draws: Draw[],
-  config: FormulaOptimizerConfig
+  config: FormulaOptimizerConfig,
+  gc: GameConfig = DEFAULT_GAME_CONFIG
 ): FormulaLabResult {
   const allCaveats = [CAVEATS.retrospective, CAVEATS.noGuarantee, CAVEATS.significance, CAVEATS.dataScope];
 
@@ -265,7 +270,7 @@ export function runFormulaOptimizer(
 
   for (let i = 0; i < config.searchIterations; i++) {
     const weights = randomWeights(config.features);
-    const eval_ = evaluateFormula(trainDraws, trainDraws.slice(0, Math.min(30, trainDraws.length)), weights, config.features);
+    const eval_ = evaluateFormula(trainDraws, trainDraws.slice(0, Math.min(30, trainDraws.length)), weights, config.features, gc);
     const complexityPenalty = computeComplexityPenalty(weights, config.features, config.regularizationStrength);
     const inSampleScore = eval_.avgMainMatches;
     const adjustedScore = Number((inSampleScore - complexityPenalty).toFixed(4));
@@ -302,15 +307,15 @@ export function runFormulaOptimizer(
       const wTestDraws = draws.slice(0, windowSize);
       const wTrainDraws = draws.slice(windowSize);
 
-      const formulaEval = evaluateFormula(wTrainDraws, wTestDraws, bestWeights, config.features);
+      const formulaEval = evaluateFormula(wTrainDraws, wTestDraws, bestWeights, config.features, gc);
 
       let randomTotal = 0;
       let randomPbHits = 0;
       for (const td of wTestDraws) {
         const actual = td.numbers as number[];
-        const randomCard = generateRandomCard();
+        const randomCard = generateRandomCard(gc);
         randomTotal += randomCard.filter(n => actual.includes(n)).length;
-        if (Math.floor(Math.random() * 20) + 1 === td.powerball) randomPbHits++;
+        if (Math.floor(Math.random() * gc.specialPool) + 1 === td.powerball) randomPbHits++;
       }
       const randomAvg = randomTotal / wTestDraws.length;
       const delta = Number((formulaEval.avgMainMatches - randomAvg).toFixed(3));
@@ -361,12 +366,12 @@ export function runFormulaOptimizer(
       const ws = replay.windows[0].windowSize;
       const pTest = shuffledDraws.slice(0, ws);
       const pTrain = shuffledDraws.slice(ws);
-      const pEval = evaluateFormula(pTrain, pTest, bestWeights, config.features);
+      const pEval = evaluateFormula(pTrain, pTest, bestWeights, config.features, gc);
 
       let pRandTotal = 0;
       for (const td of pTest) {
         const actual = td.numbers as number[];
-        pRandTotal += generateRandomCard().filter(n => actual.includes(n)).length;
+        pRandTotal += generateRandomCard(gc).filter(n => actual.includes(n)).length;
       }
       const pRandAvg = pRandTotal / pTest.length;
       permDeltas.push(pEval.avgMainMatches - pRandAvg);

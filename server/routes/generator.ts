@@ -1,7 +1,8 @@
 import type { Express } from "express";
-import { storage } from "../storage";
+import { storage, getGameConfig, DEFAULT_GAME_CONFIG } from "../storage";
 import { apiResponse } from "./helpers";
 import { generateRequestSchema } from "@shared/schema";
+import type { GameConfig } from "@shared/schema";
 import {
   getGeneratorRecommendation,
   loadBenchmarkFromDb,
@@ -9,19 +10,26 @@ import {
 } from "../analysis";
 import { getGeneratorHandler } from "../generator-registry";
 
+async function resolveGameConfig(gameId?: string): Promise<GameConfig> {
+  if (!gameId) return DEFAULT_GAME_CONFIG;
+  const game = await storage.getGame(gameId);
+  return game ? getGameConfig(game) : DEFAULT_GAME_CONFIG;
+}
+
 export function registerGeneratorRoutes(app: Express): void {
-  app.get("/api/generator/recommendation", async (_req, res) => {
+  app.get("/api/generator/recommendation", async (req, res) => {
     try {
-      if (!getLatestBenchmarkTime()) {
-        const latestRun = await storage.getLatestBenchmarkRun();
+      const gameId = (req.query.gameId as string) || undefined;
+      if (!getLatestBenchmarkTime(gameId)) {
+        const latestRun = await storage.getLatestBenchmarkRun(gameId);
         if (latestRun) {
-          loadBenchmarkFromDb(latestRun.summary as any, latestRun.createdAt);
+          loadBenchmarkFromDb(latestRun.summary as any, latestRun.createdAt, gameId);
         }
       }
-      const recommendation = getGeneratorRecommendation();
-      const draws = await storage.getModernDraws();
+      const recommendation = getGeneratorRecommendation(gameId);
+      const draws = await storage.getModernDraws(gameId);
 
-      const latestRun = await storage.getLatestBenchmarkRun();
+      const latestRun = await storage.getLatestBenchmarkRun(gameId);
       const benchmarkAge = latestRun?.createdAt ? Math.floor((Date.now() - new Date(latestRun.createdAt).getTime()) / (1000 * 60 * 60 * 24)) : null;
       const stale = benchmarkAge !== null && benchmarkAge > 7;
 
@@ -48,14 +56,16 @@ export function registerGeneratorRoutes(app: Express): void {
         });
       }
       const { count, mode, drawFitWeight, antiPopWeight, allocationMethod } = parsed.data;
+      const gameId = (req.body?.gameId as string) || undefined;
+      const gc = await resolveGameConfig(gameId);
 
-      const draws = await storage.getModernDraws();
+      const draws = await storage.getModernDraws(gameId);
       if (draws.length === 0) {
         return res.status(400).json({ ok: false, message: "No draws available. Upload data first." });
       }
 
       const handler = getGeneratorHandler(mode);
-      const picks = handler({ draws, count, drawFitWeight, antiPopWeight, allocationMethod });
+      const picks = handler({ draws, count, drawFitWeight, antiPopWeight, allocationMethod, gc, gameId });
       res.json(apiResponse(draws, picks));
     } catch (error: any) {
       res.status(500).json({ ok: false, message: error.message });

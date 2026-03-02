@@ -3,12 +3,47 @@ import { pgTable, text, varchar, integer, boolean, json, serial, timestamp } fro
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
+export const games = pgTable("games", {
+  gameId: text("game_id").primaryKey(),
+  displayName: text("display_name").notNull(),
+  mainCount: integer("main_count").notNull(),
+  mainPool: integer("main_pool").notNull(),
+  specialName: text("special_name").notNull(),
+  specialCount: integer("special_count").notNull(),
+  specialPool: integer("special_pool").notNull(),
+  hasSupplementary: boolean("has_supplementary").notNull().default(false),
+  supplementaryCount: integer("supplementary_count").default(0),
+  supplementaryPool: integer("supplementary_pool").default(0),
+  productFilter: text("product_filter").notNull(),
+  enabled: boolean("enabled").notNull().default(true),
+});
+
+export const insertGameSchema = createInsertSchema(games);
+export type InsertGame = z.infer<typeof insertGameSchema>;
+export type Game = typeof games.$inferSelect;
+
+export interface GameConfig {
+  gameId: string;
+  displayName: string;
+  mainCount: number;
+  mainPool: number;
+  specialName: string;
+  specialCount: number;
+  specialPool: number;
+  hasSupplementary: boolean;
+  supplementaryCount: number;
+  supplementaryPool: number;
+  productFilter: string;
+}
+
 export const draws = pgTable("draws", {
   id: serial("id").primaryKey(),
   drawNumber: integer("draw_number").notNull(),
   drawDate: text("draw_date").notNull(),
   numbers: json("numbers").$type<number[]>().notNull(),
   powerball: integer("powerball").notNull(),
+  supplementary: json("supplementary").$type<number[]>(),
+  gameId: text("game_id").notNull().default("AU_POWERBALL"),
   isModernFormat: boolean("is_modern_format").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow(),
 });
@@ -32,6 +67,7 @@ export const benchmarkRuns = pgTable("benchmark_runs", {
   id: serial("id").primaryKey(),
   config: json("config").$type<BenchmarkRunConfig>().notNull(),
   summary: json("summary").$type<BenchmarkSummary>().notNull(),
+  gameId: text("game_id").notNull().default("AU_POWERBALL"),
   status: text("status").notNull().default("success"),
   createdAt: timestamp("created_at").defaultNow(),
 });
@@ -49,6 +85,7 @@ export interface BenchmarkRunConfig {
   presetName?: string;
   permutationStrategies?: string[];
   regimeSplits?: boolean;
+  gameId?: string;
 }
 
 export const insertBenchmarkRunSchema = createInsertSchema(benchmarkRuns).omit({ id: true, createdAt: true });
