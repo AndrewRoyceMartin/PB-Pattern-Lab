@@ -7,6 +7,7 @@ import { registerGeneratorRoutes } from "./routes/generator";
 import { registerFormulaLabRoutes } from "./routes/formulaLab";
 import { registerAutoRoutes } from "./routes/auto";
 import { registerSyncRoutes } from "./routes/sync";
+import { registerPredictionRoutes } from "./routes/predictions";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -19,6 +20,7 @@ export async function registerRoutes(
   registerFormulaLabRoutes(app);
   registerAutoRoutes(app);
   registerSyncRoutes(app);
+  registerPredictionRoutes(app);
 
   return httpServer;
 }

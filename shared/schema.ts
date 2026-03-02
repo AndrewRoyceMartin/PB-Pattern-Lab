@@ -45,6 +45,9 @@ export const draws = pgTable("draws", {
   supplementary: json("supplementary").$type<number[]>(),
   gameId: text("game_id").notNull().default("AU_POWERBALL"),
   isModernFormat: boolean("is_modern_format").notNull().default(true),
+  source: text("source"),
+  sourceCompanyId: text("source_company_id"),
+  sourceFetchedAt: timestamp("source_fetched_at"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -94,6 +97,80 @@ export type BenchmarkRun = typeof benchmarkRuns.$inferSelect;
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
+
+export const predictionSets = pgTable("prediction_sets", {
+  id: serial("id").primaryKey(),
+  gameId: text("game_id").notNull(),
+  lane: text("lane").notNull(),
+  strategyName: text("strategy_name").notNull(),
+  benchmarkRunId: integer("benchmark_run_id"),
+  optimiserRunId: text("optimiser_run_id"),
+  formulaHash: text("formula_hash"),
+  seed: integer("seed").notNull(),
+  linesJson: json("lines_json").$type<GeneratedPick[]>().notNull(),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertPredictionSetSchema = createInsertSchema(predictionSets).omit({ id: true, createdAt: true });
+export type InsertPredictionSet = z.infer<typeof insertPredictionSetSchema>;
+export type PredictionSet = typeof predictionSets.$inferSelect;
+
+export const predictionEvaluations = pgTable("prediction_evaluations", {
+  id: serial("id").primaryKey(),
+  predictionSetId: integer("prediction_set_id").notNull(),
+  drawNumber: integer("draw_number").notNull(),
+  gameId: text("game_id").notNull(),
+  lineResults: json("line_results").$type<LineEvaluationResult[]>().notNull(),
+  bestMainHits: integer("best_main_hits").notNull(),
+  bestPbHit: boolean("best_pb_hit").notNull(),
+  totalMainHits: integer("total_main_hits").notNull(),
+  totalPbHits: integer("total_pb_hits").notNull(),
+  linesEvaluated: integer("lines_evaluated").notNull(),
+  evaluatedAt: timestamp("evaluated_at").defaultNow(),
+});
+
+export const insertPredictionEvaluationSchema = createInsertSchema(predictionEvaluations).omit({ id: true, evaluatedAt: true });
+export type InsertPredictionEvaluation = z.infer<typeof insertPredictionEvaluationSchema>;
+export type PredictionEvaluation = typeof predictionEvaluations.$inferSelect;
+
+export interface LineEvaluationResult {
+  lineIndex: number;
+  mainHits: number;
+  mainMatches: number[];
+  pbHit: boolean;
+  prize: string | null;
+}
+
+export interface PredictionDiffSummary {
+  mainsPercentChanged: number;
+  pbPercentChanged: number;
+  mainsOverlapRatio: number;
+  pbOverlapRatio: number;
+  newMains: number[];
+  removedMains: number[];
+  newPBs: number[];
+  removedPBs: number[];
+}
+
+export interface LineDiffMapping {
+  currentIndex: number;
+  previousIndex: number;
+  mainOverlap: number;
+  pbMatch: boolean;
+  keptMains: number[];
+  addedMains: number[];
+  removedMains: number[];
+  pbChanged: boolean;
+  linePercentChanged: number;
+}
+
+export interface PredictionDiffResult {
+  summary: PredictionDiffSummary;
+  lineMapping: LineDiffMapping[];
+  previousSetId: number;
+  previousGeneratedAt: string;
+}
 
 // ── Typed DTOs for analysis pipeline ──
 

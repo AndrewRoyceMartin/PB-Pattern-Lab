@@ -16,6 +16,9 @@ function normalizeApiDraw(r: { DrawNumber: number; DrawDate: string; PrimaryNumb
     isModernFormat: r.PrimaryNumbers.length === 7 &&
       r.PrimaryNumbers.every((n) => n >= 1 && n <= 35) &&
       r.SecondaryNumbers[0] >= 1 && r.SecondaryNumbers[0] <= 20,
+    source: "api",
+    sourceCompanyId: null,
+    sourceFetchedAt: new Date(),
   };
 }
 
@@ -38,6 +41,9 @@ function normalizeScrapedDraw(d: ScrapedDrawData): InsertDraw | null {
     supplementary: null,
     gameId: GAME_ID,
     isModernFormat: true,
+    source: "scrape",
+    sourceCompanyId: null,
+    sourceFetchedAt: new Date(),
   };
 }
 

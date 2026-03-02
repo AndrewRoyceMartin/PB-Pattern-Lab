@@ -1,14 +1,15 @@
 import type { Express } from "express";
 import { storage, getGameConfig, DEFAULT_GAME_CONFIG } from "../storage";
 import { apiResponse } from "./helpers";
-import type { BenchmarkRunConfig, BenchmarkStrategyStability, GeneratedPick, FormulaWeights, BenchmarkRun, GameConfig } from "@shared/schema";
+import type { BenchmarkRunConfig, BenchmarkStrategyStability, GeneratedPick, FormulaWeights, BenchmarkRun, GameConfig, PredictionDiffResult } from "@shared/schema";
 import {
   runBenchmarkValidation,
   storeBenchmarkResult,
   scoreAntiPopularity,
 } from "../analysis";
 import { getGeneratorHandler } from "../generator-registry";
-import { runFormulaOptimizer, generateFormulaCard, generateDiverseFormulaCard } from "../formula-lab";
+import { runFormulaOptimizer, generateDiverseFormulaCard } from "../formula-lab";
+import { buildDiffResult } from "../diff-engine";
 import crypto from "crypto";
 
 async function resolveGameConfig(gameId?: string): Promise<GameConfig> {
@@ -165,6 +166,39 @@ function buildRunStamp(opts: {
   };
 }
 
+async function savePredictionAndDiff(
+  picks: GeneratedPick[],
+  gameId: string,
+  lane: string,
+  strategyName: string,
+  seed: number,
+  benchmarkRunId: number | null,
+  optimiserRunId: string | null,
+  formulaHash: string | null,
+  mainCount: number,
+): Promise<{ predictionSetId: number; diff: PredictionDiffResult | null }> {
+  const previousSet = await storage.getLatestPredictionSet(gameId, lane);
+
+  const saved = await storage.savePredictionSet({
+    gameId,
+    lane,
+    strategyName,
+    seed,
+    benchmarkRunId: benchmarkRunId ?? undefined,
+    optimiserRunId,
+    formulaHash,
+    linesJson: picks,
+    notes: null,
+  });
+
+  let diff: PredictionDiffResult | null = null;
+  if (previousSet) {
+    diff = buildDiffResult(previousSet, picks, mainCount);
+  }
+
+  return { predictionSetId: saved.id, diff };
+}
+
 const CNF_FEATURES = {
   freqTotal: false, freqL50: false, freqL20: false,
   recencySinceSeen: true, trendL10: true, structureFit: true, carryoverAffinity: true, antiPopularity: false,
@@ -183,7 +217,48 @@ function mulberry32(s: number) {
   };
 }
 
-function generateCNFPicks(draws: any[], seed: number): GeneratedPick[] {
+type PbMode = "default" | "unique_spread" | "guaranteed";
+
+function applyPbMode(picks: GeneratedPick[], pbMode: PbMode, specialPool: number, rng: () => number): GeneratedPick[] {
+  if (pbMode === "default" || picks.length === 0) return picks;
+
+  if (pbMode === "unique_spread") {
+    const usedPbs = new Set<number>();
+    return picks.map((p, i) => {
+      if (usedPbs.has(p.powerball) && usedPbs.size < specialPool) {
+        let newPb = p.powerball;
+        for (let tries = 0; tries < 100; tries++) {
+          newPb = Math.floor(rng() * specialPool) + 1;
+          if (!usedPbs.has(newPb)) break;
+        }
+        usedPbs.add(newPb);
+        return { ...p, powerball: newPb };
+      }
+      usedPbs.add(p.powerball);
+      return p;
+    });
+  }
+
+  if (pbMode === "guaranteed") {
+    const targetCount = Math.min(specialPool, picks.length);
+    const pbSequence: number[] = [];
+    for (let i = 1; i <= specialPool; i++) pbSequence.push(i);
+    for (let i = pbSequence.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [pbSequence[i], pbSequence[j]] = [pbSequence[j], pbSequence[i]];
+    }
+    return picks.map((p, i) => {
+      if (i < targetCount) {
+        return { ...p, powerball: pbSequence[i] };
+      }
+      return p;
+    });
+  }
+
+  return picks;
+}
+
+function generateCNFPicks(draws: any[], seed: number, pbMode: PbMode = "default", specialPool: number = 20): GeneratedPick[] {
   const rng = mulberry32(seed);
   const picks: GeneratedPick[] = [];
   const usedSets = new Set<string>();
@@ -207,7 +282,9 @@ function generateCNFPicks(draws: any[], seed: number): GeneratedPick[] {
     });
   }
   picks.forEach((p, i) => { p.rank = i + 1; });
-  return picks;
+
+  const finalPicks = applyPbMode(picks, pbMode, specialPool, rng);
+  return finalPicks;
 }
 
 export function registerAutoRoutes(app: Express): void {
@@ -221,7 +298,8 @@ export function registerAutoRoutes(app: Express): void {
         return res.status(400).json({ ok: false, message: `Only ${draws.length} modern draws available. Need at least ${minRequired} (${AUTO_BENCHMARK_CONFIG.minTrainDraws} training + ${Math.max(...AUTO_BENCHMARK_CONFIG.windowSizes)} test window) for auto-generate.` });
       }
 
-      console.log("[auto] Running benchmark with fixed config...");
+      const pbMode = (req.body?.pbMode as PbMode) || "default";
+      console.log(`[auto] Running benchmark with fixed config (pbMode=${pbMode})...`);
       const { benchmarkMode, windowSizes, minTrainDraws, seed, randomBaselineRuns, runPermutation, permutationRuns, selectedStrategies, presetName, regimeSplits } = AUTO_BENCHMARK_CONFIG;
 
       const benchmarkResults = runBenchmarkValidation(
@@ -241,13 +319,17 @@ export function registerAutoRoutes(app: Express): void {
       console.log(`[auto] Winner: ${winner.strategy} (delta: ${winner.avgDelta}, fallback: ${winner.isFallback})`);
 
       let picks: GeneratedPick[];
+      const autoRng = mulberry32(seed + 1);
       if (winner.isFallback) {
         const handler = getGeneratorHandler("strategy_portfolio");
         picks = handler({ draws, count: 12, allocationMethod: "validation_weighted", gc });
+        if (pbMode !== "default") {
+          picks = applyPbMode(picks, pbMode, gc.specialPool, autoRng);
+        }
       } else {
         const generatorConfig = STRATEGY_TO_GENERATOR[winner.strategy];
         if (generatorConfig && generatorConfig.mode === "composite_no_frequency") {
-          picks = generateCNFPicks(draws, seed);
+          picks = generateCNFPicks(draws, seed, pbMode, gc.specialPool);
         } else if (generatorConfig) {
           const handler = getGeneratorHandler(generatorConfig.mode as any);
           picks = handler({
@@ -256,10 +338,16 @@ export function registerAutoRoutes(app: Express): void {
             antiPopWeight: generatorConfig.antiPop,
             gc,
           });
+          if (pbMode !== "default") {
+            picks = applyPbMode(picks, pbMode, gc.specialPool, autoRng);
+          }
         } else {
           console.warn(`[auto] Winner strategy "${winner.strategy}" has no generator mapping, using balanced fallback`);
           const handler = getGeneratorHandler("balanced");
           picks = handler({ draws, count: 12, drawFitWeight: 60, antiPopWeight: 40, gc });
+          if (pbMode !== "default") {
+            picks = applyPbMode(picks, pbMode, gc.specialPool, autoRng);
+          }
         }
       }
 
@@ -284,11 +372,18 @@ export function registerAutoRoutes(app: Express): void {
         seed,
       });
 
+      const effectiveGameId = gameId || "AU_POWERBALL";
+      const { predictionSetId, diff } = await savePredictionAndDiff(
+        picks, effectiveGameId, "auto", winner.strategy, seed, run.id, null, null, gc.mainCount
+      );
+
       res.json(apiResponse(draws, {
         benchmarkRunId: run.id,
         benchmarkRunTimestamp: run.createdAt,
         runConfigUsed,
         runStamp,
+        predictionSetId,
+        diff,
         winner: {
           strategy: winner.strategy,
           reason: winner.reason,
@@ -309,14 +404,16 @@ export function registerAutoRoutes(app: Express): void {
   app.post("/api/auto/generate-composite-no-frequency", async (req, res) => {
     try {
       const gameId = (req.body?.gameId as string) || undefined;
+      const gc = await resolveGameConfig(gameId);
       const draws = await storage.getModernDraws(gameId);
       if (draws.length < 50) {
         return res.status(400).json({ ok: false, message: `Only ${draws.length} modern draws available. Need at least 50 for generation.` });
       }
 
-      console.log("[auto] Generating 12 lines using Composite No-Frequency...");
+      const pbMode = (req.body?.pbMode as PbMode) || "default";
+      console.log(`[auto] Generating 12 lines using Composite No-Frequency (pbMode=${pbMode})...`);
       const seed = 42;
-      const picks = generateCNFPicks(draws, seed);
+      const picks = generateCNFPicks(draws, seed, pbMode, gc.specialPool);
 
       const latestRun = await storage.getLatestBenchmarkRun(gameId);
 
@@ -332,10 +429,18 @@ export function registerAutoRoutes(app: Express): void {
 
       const confidence = buildConfidencePanel("Composite No-Frequency", latestRun);
 
+      const effectiveGameId = gameId || "AU_POWERBALL";
+      const { predictionSetId, diff } = await savePredictionAndDiff(
+        picks, effectiveGameId, "cnf", "Composite No-Frequency", seed,
+        latestRun?.id ?? null, null, formulaHash, gc.mainCount
+      );
+
       res.json(apiResponse(draws, {
         runStamp,
         picks,
         confidence,
+        predictionSetId,
+        diff,
         strategyDescription: "Composite scoring using recency + trend + structure + carryover. Frequency signals (freqTotal, freqL50, freqL20) are explicitly disabled — set to zero weight.",
         disclaimer: "These picks are generated using historical validation metrics. They are not guaranteed to outperform chance in future draws.",
       }));
@@ -348,12 +453,14 @@ export function registerAutoRoutes(app: Express): void {
   app.post("/api/auto/optimise-and-generate", async (req, res) => {
     try {
       const gameId = (req.body?.gameId as string) || undefined;
+      const gc = await resolveGameConfig(gameId);
       const draws = await storage.getModernDraws(gameId);
       if (draws.length < 50) {
         return res.status(400).json({ ok: false, message: `Only ${draws.length} modern draws available. Need at least 50 for optimise-and-generate.` });
       }
 
-      console.log("[auto] Step 1: Running optimiser...");
+      const pbMode = (req.body?.pbMode as PbMode) || "default";
+      console.log(`[auto] Step 1: Running optimiser (pbMode=${pbMode})...`);
       const config = {
         ...OPTIMISER_CONFIG,
         trainingWindowSize: Math.min(200, Math.floor(draws.length * 0.7)),
@@ -394,6 +501,8 @@ export function registerAutoRoutes(app: Express): void {
       }
 
       picks.forEach((p, i) => { p.rank = i + 1; });
+      const finalPicks = applyPbMode(picks, pbMode, gc.specialPool, rng);
+      finalPicks.forEach((p, i) => { p.rank = i + 1; });
 
       const runStamp = buildRunStamp({
         strategyName: "Optimised Formula",
@@ -422,10 +531,18 @@ export function registerAutoRoutes(app: Express): void {
         caveatedVerdict: optimiserResult.caveatedVerdict,
       };
 
+      const effectiveGameId = gameId || "AU_POWERBALL";
+      const { predictionSetId, diff } = await savePredictionAndDiff(
+        finalPicks, effectiveGameId, "optimised", "Optimised Formula", seed,
+        null, optimiserRunId, formulaHash, gc.mainCount
+      );
+
       res.json(apiResponse(draws, {
         runStamp,
-        picks,
+        picks: finalPicks,
         confidence,
+        predictionSetId,
+        diff,
         optimiserMeta: {
           weightsUsed: bestWeights,
           formulaHash,
@@ -440,6 +557,43 @@ export function registerAutoRoutes(app: Express): void {
       }));
     } catch (error: any) {
       console.error("[auto] Optimise Error:", error.message);
+      res.status(500).json({ ok: false, message: error.message });
+    }
+  });
+
+  app.get("/api/dev/determinism-check", async (req, res) => {
+    try {
+      const gameId = (req.query.gameId as string) || "AU_POWERBALL";
+      const lane = (req.query.lane as string) || "cnf";
+      const seed = parseInt(req.query.seed as string) || 42;
+
+      const gc = await resolveGameConfig(gameId);
+      const draws = await storage.getModernDraws(gameId);
+      if (draws.length < 50) {
+        return res.status(400).json({ ok: false, message: "Need at least 50 draws" });
+      }
+
+      const picksA = generateCNFPicks(draws, seed, "default", gc.specialPool);
+      const picksB = generateCNFPicks(draws, seed, "default", gc.specialPool);
+
+      const identical = picksA.length === picksB.length &&
+        picksA.every((p, i) =>
+          p.numbers.join(",") === picksB[i].numbers.join(",") &&
+          p.powerball === picksB[i].powerball
+        );
+
+      res.json({
+        ok: true,
+        data: {
+          seed,
+          lane,
+          gameId,
+          identical,
+          linesA: picksA.map(p => ({ numbers: p.numbers, pb: p.powerball })),
+          linesB: picksB.map(p => ({ numbers: p.numbers, pb: p.powerball })),
+        },
+      });
+    } catch (error: any) {
       res.status(500).json({ ok: false, message: error.message });
     }
   });

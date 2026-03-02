@@ -1,0 +1,225 @@
+Here’s a stable, simple diff algorithm you can drop in. It’s designed so line-to-line matching doesn’t jump around week to week.
+
+Goal
+
+Compare current 12-line set to the previous set for the same game + lane, and produce:
+
+% change for mains + PBs (set-level)
+
+per-line highlights (new/kept/removed numbers)
+
+stable line pairing (current line ↔ previous line)
+
+1) Set-level metrics (simple + meaningful)
+Unique mains across the whole card
+
+prevMains = set(prev lines mains flattened)
+
+currMains = set(curr lines mains flattened)
+
+Jaccard overlap
+
+intersection = |prevMains ∩ currMains|
+
+union = |prevMains ∪ currMains|
+
+overlapRatio = intersection / union (0..1)
+
+Percent changed
+
+mainsPercentChanged = round(100 * (1 - overlapRatio))
+
+PB coverage change
+
+Same for PB values:
+
+prevPBs = set(prev PB values)
+
+currPBs = set(curr PB values)
+
+pbPercentChanged = round(100 * (1 - jaccard(prevPBs, currPBs)))
+
+Also return lists
+
+newMains = sorted(currMains - prevMains)
+
+removedMains = sorted(prevMains - currMains)
+
+newPBs, removedPBs
+
+This gives you the “headline” change numbers.
+
+2) Stable line pairing algorithm (so matches don’t bounce)
+
+We need to match each current line to one previous line.
+
+Score function (line similarity)
+
+For a current line c and previous line p:
+
+Main overlap
+
+mainOverlap = count(c.mains ∩ p.mains) (0..7 for Powerball)
+
+PB match
+
+pbMatch = (c.pb == p.pb ? 1 : 0)
+
+Similarity score
+
+Use:
+
+score = mainOverlap * 10 + pbMatch * 2
+
+Why:
+
+main overlap dominates
+
+PB match is minor bonus
+
+Deterministic tie-breakers (important)
+
+If two prev lines produce the same score, choose the one with:
+
+higher mainOverlap
+
+PB match true
+
+lower previous line index (stable)
+
+lower current line index (stable)
+
+This guarantees the mapping is stable.
+
+3) Assignment method (greedy + stable)
+
+For 12 lines, you can do a greedy assignment that’s stable:
+
+Step A — Compute all candidate pair scores
+
+Create a list of all (currentIndex, prevIndex, score, mainOverlap, pbMatch).
+
+Step B — Sort candidates by:
+
+score descending
+
+mainOverlap descending
+
+pbMatch descending
+
+prevIndex ascending
+
+currentIndex ascending
+
+Step C — Greedy pick
+
+Walk through sorted candidates:
+
+If currentIndex not yet assigned and prevIndex unused:
+
+assign it
+
+Continue until all current lines assigned (or prev lines exhausted)
+
+This produces a 1:1 mapping and is deterministic.
+
+Why not Hungarian algorithm?
+Greedy is simpler, fast, stable, and “good enough” for 12 lines. Most importantly: it avoids surprising remaps.
+
+4) Per-line highlights (what changed)
+
+Once you have current line ↔ prev line mapping:
+
+For each current line:
+
+keptMains = sorted(curr ∩ prev)
+
+addedMains = sorted(curr - prev)
+
+removedMains = sorted(prev - curr) (optional display)
+
+pbChanged = (curr.pb != prev.pb)
+
+pbKept = curr.pb if not changed
+
+UI highlighting rules
+
+Kept: normal style
+
+Added: highlight (green outline or bold)
+
+Removed: show under line as small “Removed: …” (optional)
+
+PB:
+
+if changed: highlight PB
+
+5) “Change % per line” (optional, nice)
+
+For each line:
+
+lineOverlapRatio = mainOverlap / mainCount
+
+linePercentChanged = round(100 * (1 - lineOverlapRatio))
+
+Show it as:
+
+“Line change: 43%”
+
+6) What the API should return
+
+Return from backend:
+
+{
+  "summary": {
+    "mainsPercentChanged": 32,
+    "pbPercentChanged": 50,
+    "mainsOverlapRatio": 0.68,
+    "pbOverlapRatio": 0.50,
+    "newMains": [ ... ],
+    "removedMains": [ ... ],
+    "newPBs": [ ... ],
+    "removedPBs": [ ... ]
+  },
+  "lineMapping": [
+    {
+      "currentIndex": 0,
+      "previousIndex": 7,
+      "mainOverlap": 4,
+      "pbMatch": false,
+      "keptMains": [ ... ],
+      "addedMains": [ ... ],
+      "removedMains": [ ... ],
+      "pbChanged": true
+    }
+  ]
+}
+7) Replit tasks (implementation)
+Task A — Backend diff service
+
+Add diffPredictionSets(prevSet, currSet, gameConfig) implementing the above
+
+Store results in response (no need to persist)
+
+Task B — Add endpoint
+
+GET /api/predictions/compare-latest?gameId=...&lane=cnf
+Returns:
+
+latest set
+
+previous set
+
+diff summary + line mapping
+
+Or compute immediately after generation and return in generator response.
+
+Task C — Frontend highlights
+
+Render current 12 lines
+
+Apply mapping and highlight addedMains
+
+Show summary % at top
+
+If you want the cleanest UX: compute the diff immediately after generation (server-side) and return it in the same response, so the user always sees “what changed since last time” without clicking anything.

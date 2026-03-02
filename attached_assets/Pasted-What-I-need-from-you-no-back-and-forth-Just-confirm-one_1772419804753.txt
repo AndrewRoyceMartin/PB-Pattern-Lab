@@ -1,0 +1,278 @@
+What I need from you (no back-and-forth)
+
+Just confirm one thing so I scope the diff correctly:
+
+✅ When you say “last prediction”, do you mean:
+
+last generated for the same game and lane (Powerball + CNF / Powerball + Optimised), or
+
+last generated overall regardless of mode?
+
+If you don’t answer, I’ll implement same game + same lane (most useful).
+
+last generated for the same game and lane (Powerball + CNF / Powerball + Optimised), or
+
+Perfect — we’ll scope comparisons to same game + same lane (e.g., Powerball+CNF compared to previous Powerball+CNF, and Powerball+Optimised compared to previous Powerball+Optimised).
+
+Here’s the streamlined Replit plan for the week-to-week diff plus the other recommended upgrades, aligned to that rule.
+
+Replit Implementation Plan
+Phase 1 — Week-to-week change tracking (same game + same lane)
+Task 1 — Persist prediction sets
+
+DB: prediction_sets
+
+id (uuid)
+
+gameId
+
+lane (cnf | optimised | auto | portfolio)
+
+strategyName
+
+benchmarkRunId (nullable)
+
+optimiserRunId (nullable)
+
+formulaHash (nullable)
+
+seed
+
+generatedAt
+
+linesJson (12/20 lines with mains + PB + scores)
+
+notes (nullable)
+
+Acceptance
+
+Every Generate action in Simple mode saves a set by default
+
+Response includes predictionSetId
+
+Task 2 — “Previous set for this lane” retrieval
+
+Add helper:
+
+getPreviousPredictionSet(gameId, lane) → most recent set before current
+
+Acceptance
+
+Always compares within same game + same lane
+
+Handles “no previous set” gracefully
+
+Task 3 — Diff engine + percent change
+
+Add service:
+
+diffPredictionSets(prev, curr) returns:
+
+Set-level
+
+mainsOverlapRatio (Jaccard)
+
+mainsPercentChanged = 100*(1-overlapRatio)
+
+pbOverlapRatio and pbPercentChanged
+
+newMains[], removedMains[]
+
+newPBs[], removedPBs[]
+
+Line-level
+
+Best pairing between current lines and previous lines (greedy or Hungarian-lite):
+
+for each current line, find the prev line with max main overlap (+ PB match bonus)
+
+For each current line:
+
+keptMains[], addedMains[], removedMains[]
+
+pbChanged: boolean
+
+Acceptance
+
+API returns diff summary + per-line highlights
+
+Percent values are stable and intuitive
+
+Task 4 — Generator UI highlight
+
+On results:
+
+“Compared to last time (same lane)”
+
+“Main numbers changed: 32%”
+
+“Powerballs changed: 50%”
+
+Per line:
+
+highlight new numbers
+
+optional toggle “show removed numbers”
+
+Acceptance
+
+After generating, user immediately sees what changed
+
+“View previous set” opens a side-by-side panel
+
+Task 5 — Export diffs
+
+Exports:
+
+prediction_current.json
+
+prediction_previous.json
+
+prediction_diff_summary.csv
+
+prediction_diff_lines.csv
+
+Acceptance
+
+Exports include run stamp + gameId + lane + timestamps
+
+Phase 2 — Correctness + trust
+Task 6 — No-drift mapping (benchmark winner → generator)
+
+Ensure recommendation returns:
+
+explicit generator mode (e.g., composite_no_frequency) or
+
+exact weight config used by generator
+
+Acceptance
+
+The “best strategy” shown always matches how picks are generated
+
+No silent fallback to generic “balanced”
+
+Task 7 — Determinism audit
+
+Eliminate all Math.random() from seeded workflows and pass seeded RNG into:
+
+shuffles
+
+PB selection
+
+diversity noise
+
+tie-breaking
+
+Add dev-only endpoint:
+
+/api/dev/determinism-check?gameId=...&lane=cnf&seed=42
+
+Acceptance
+
+same inputs → identical picks (CNF lane)
+
+run stamp seed always matches actual RNG
+
+Phase 3 — Confidence: “is it worth using?”
+Task 8 — Confidence panel on pick results
+
+For CNF/Auto (benchmark-backed):
+
+Δ vs random mean
+
+percentile vs random
+
+random band (p05–p95)
+
+permutation badge if available
+
+“Worth it” badge
+
+For Optimised lane:
+
+show “local evidence” unless benchmarked
+
+optional “Validate this optimiser run” button
+
+Acceptance
+
+Users can see “how much better than random”
+
+“Worth it” uses clear thresholds
+
+Phase 4 — Data quality and multi-game resilience
+Task 9 — Draw provenance
+
+Add to draws:
+
+source (csv|api|scrape)
+
+sourceCompanyId
+
+sourceFetchedAt
+
+sourceUrl
+
+Acceptance
+
+ingest page shows provenance badges
+
+helps troubleshoot data issues fast
+
+Task 10 — Sync depth / incremental history
+
+Ensure TheLott sync pulls enough history for stable validation.
+
+paginate / loop providers where possible
+
+stop-if-seen
+
+Acceptance
+
+Powerball and Saturday Lotto have sufficient draw history (200+ ideal)
+
+re-sync is incremental
+
+Phase 5 — Practical generator add-ons
+Task 11 — PB coverage mode (PowerPick)
+
+Default PB
+
+Unique PBs across 12 (60% PB hit chance somewhere)
+
+Guaranteed PB (20 lines)
+
+Acceptance
+
+works in CNF + Auto + Optimised lanes
+
+clearly labelled as coverage, not prediction
+
+Phase 6 — Real-world logging
+Task 12 — Log draw results and evaluate a saved prediction set
+
+Tables:
+
+logged_draws
+
+prediction_evaluations
+
+Acceptance
+
+you can log a draw and see how your previous set performed
+
+shows best line + distribution + PB hit rate
+
+compares to random expectations using stored benchmark stats
+
+Suggested order (fastest value)
+
+Phase 1 (diff + % change + highlights)
+
+Task 8 (confidence panel)
+
+Task 6–7 (no drift + determinism)
+
+provenance + sync depth
+
+PB coverage + logging

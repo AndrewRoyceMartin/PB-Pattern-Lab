@@ -92,11 +92,11 @@ export async function runBenchmark(opts: BenchmarkOptions = {}) {
   return json.data;
 }
 
-export async function runAutoGenerate(gameId?: string) {
+export async function runAutoGenerate(gameId?: string, pbMode?: string) {
   const res = await fetch("/api/auto/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ gameId }),
+    body: JSON.stringify({ gameId, pbMode }),
   });
   const json = await res.json();
   if (!res.ok || !json.ok) {
@@ -106,11 +106,11 @@ export async function runAutoGenerate(gameId?: string) {
   return json.data;
 }
 
-export async function runAutoCompositeNoFrequency(gameId?: string) {
+export async function runAutoCompositeNoFrequency(gameId?: string, pbMode?: string) {
   const res = await fetch("/api/auto/generate-composite-no-frequency", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ gameId }),
+    body: JSON.stringify({ gameId, pbMode }),
   });
   const json = await res.json();
   if (!res.ok || !json.ok) {
@@ -119,11 +119,11 @@ export async function runAutoCompositeNoFrequency(gameId?: string) {
   return json.data;
 }
 
-export async function runAutoOptimiseAndGenerate(gameId?: string) {
+export async function runAutoOptimiseAndGenerate(gameId?: string, pbMode?: string) {
   const res = await fetch("/api/auto/optimise-and-generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ gameId }),
+    body: JSON.stringify({ gameId, pbMode }),
   });
   const json = await res.json();
   if (!res.ok || !json.ok) {

@@ -314,6 +314,9 @@ async function fetchDrawPage(baseUrl: string, drawNum: number): Promise<InsertDr
     numbers: mainNumbers.sort((a, b) => a - b),
     powerball,
     isModernFormat: isModern,
+    source: "scrape",
+    sourceCompanyId: "lottolyzer",
+    sourceFetchedAt: new Date(),
   };
 }
 
@@ -387,6 +390,9 @@ function parseCSVRow(headers: string[], cols: string[]): any | null {
       numbers: numbers.sort((a, b) => a - b),
       powerball,
       isModernFormat: isModern,
+      source: "csv",
+      sourceCompanyId: null,
+      sourceFetchedAt: new Date(),
     };
   } catch {
     return null;
@@ -474,6 +480,9 @@ function parseRSSForAUPowerball(xml: string): InsertDraw[] {
       numbers: mainNumbers.sort((a, b) => a - b),
       powerball,
       isModernFormat: isModern,
+      source: "rss",
+      sourceCompanyId: null,
+      sourceFetchedAt: new Date(),
     });
   }
 

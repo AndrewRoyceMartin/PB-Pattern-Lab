@@ -1,6 +1,6 @@
-import { type Draw, type InsertDraw, draws, type BenchmarkRun, type InsertBenchmarkRun, benchmarkRuns, type BenchmarkSummary, type BenchmarkRunConfig, type Game, type InsertGame, games, type GameConfig } from "@shared/schema";
+import { type Draw, type InsertDraw, draws, type BenchmarkRun, type InsertBenchmarkRun, benchmarkRuns, type BenchmarkSummary, type BenchmarkRunConfig, type Game, type InsertGame, games, type GameConfig, type PredictionSet, type InsertPredictionSet, predictionSets, type PredictionEvaluation, type InsertPredictionEvaluation, predictionEvaluations } from "@shared/schema";
 import { drizzle } from "drizzle-orm/node-postgres";
-import { eq, desc, sql, and } from "drizzle-orm";
+import { eq, desc, sql, and, ne } from "drizzle-orm";
 import pg from "pg";
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
@@ -20,6 +20,13 @@ export interface IStorage {
   getGame(gameId: string): Promise<Game | null>;
   listGames(): Promise<Game[]>;
   upsertGame(game: InsertGame): Promise<Game>;
+  savePredictionSet(set: InsertPredictionSet): Promise<PredictionSet>;
+  getLatestPredictionSet(gameId: string, lane: string): Promise<PredictionSet | null>;
+  getPreviousPredictionSet(gameId: string, lane: string, excludeId?: number): Promise<PredictionSet | null>;
+  listPredictionSets(gameId?: string, lane?: string, limit?: number): Promise<PredictionSet[]>;
+  getPredictionSetById(id: number): Promise<PredictionSet | null>;
+  savePredictionEvaluation(evaluation: InsertPredictionEvaluation): Promise<PredictionEvaluation>;
+  getEvaluationsForSet(predictionSetId: number): Promise<PredictionEvaluation[]>;
 }
 
 const GAME_DEFINITIONS: InsertGame[] = [
@@ -201,6 +208,59 @@ export class DatabaseStorage implements IStorage {
     }
     const [inserted] = await db.insert(games).values(game).returning();
     return inserted;
+  }
+
+  async savePredictionSet(set: InsertPredictionSet): Promise<PredictionSet> {
+    const [inserted] = await db.insert(predictionSets).values(set as any).returning();
+    return inserted;
+  }
+
+  async getLatestPredictionSet(gameId: string, lane: string): Promise<PredictionSet | null> {
+    const rows = await db.select().from(predictionSets)
+      .where(and(eq(predictionSets.gameId, gameId), eq(predictionSets.lane, lane)))
+      .orderBy(desc(predictionSets.createdAt))
+      .limit(1);
+    return rows[0] ?? null;
+  }
+
+  async getPreviousPredictionSet(gameId: string, lane: string, excludeId?: number): Promise<PredictionSet | null> {
+    const conditions = [eq(predictionSets.gameId, gameId), eq(predictionSets.lane, lane)];
+    if (excludeId !== undefined) {
+      conditions.push(ne(predictionSets.id, excludeId));
+    }
+    const rows = await db.select().from(predictionSets)
+      .where(and(...conditions))
+      .orderBy(desc(predictionSets.createdAt))
+      .limit(1);
+    return rows[0] ?? null;
+  }
+
+  async listPredictionSets(gameId?: string, lane?: string, limit: number = 20): Promise<PredictionSet[]> {
+    const conditions = [];
+    if (gameId) conditions.push(eq(predictionSets.gameId, gameId));
+    if (lane) conditions.push(eq(predictionSets.lane, lane));
+    const query = conditions.length > 0
+      ? db.select().from(predictionSets).where(and(...conditions))
+      : db.select().from(predictionSets);
+    return query.orderBy(desc(predictionSets.createdAt)).limit(limit);
+  }
+
+  async getPredictionSetById(id: number): Promise<PredictionSet | null> {
+    const rows = await db.select().from(predictionSets)
+      .where(eq(predictionSets.id, id))
+      .limit(1);
+    return rows[0] ?? null;
+  }
+
+  async savePredictionEvaluation(evaluation: InsertPredictionEvaluation): Promise<PredictionEvaluation> {
+    const [inserted] = await db.insert(predictionEvaluations).values(evaluation as any).returning();
+    return inserted;
+  }
+
+  async getEvaluationsForSet(predictionSetId: number): Promise<PredictionEvaluation[]> {
+    return db.select().from(predictionEvaluations)
+      .where(eq(predictionEvaluations.predictionSetId, predictionSetId))
+      .orderBy(desc(predictionEvaluations.evaluatedAt));
   }
 }
 

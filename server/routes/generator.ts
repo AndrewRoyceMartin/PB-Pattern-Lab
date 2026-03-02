@@ -2,13 +2,14 @@ import type { Express } from "express";
 import { storage, getGameConfig, DEFAULT_GAME_CONFIG } from "../storage";
 import { apiResponse } from "./helpers";
 import { generateRequestSchema } from "@shared/schema";
-import type { GameConfig } from "@shared/schema";
+import type { GameConfig, PredictionDiffResult } from "@shared/schema";
 import {
   getGeneratorRecommendation,
   loadBenchmarkFromDb,
   getLatestBenchmarkTime,
 } from "../analysis";
 import { getGeneratorHandler } from "../generator-registry";
+import { buildDiffResult } from "../diff-engine";
 
 async function resolveGameConfig(gameId?: string): Promise<GameConfig> {
   if (!gameId) return DEFAULT_GAME_CONFIG;
@@ -66,7 +67,25 @@ export function registerGeneratorRoutes(app: Express): void {
 
       const handler = getGeneratorHandler(mode);
       const picks = handler({ draws, count, drawFitWeight, antiPopWeight, allocationMethod, gc, gameId });
-      res.json(apiResponse(draws, picks));
+
+      const effectiveGameId = gameId || "AU_POWERBALL";
+      const previousSet = await storage.getLatestPredictionSet(effectiveGameId, "advanced");
+
+      const saved = await storage.savePredictionSet({
+        gameId: effectiveGameId,
+        lane: "advanced",
+        strategyName: mode,
+        seed: 0,
+        linesJson: picks,
+        notes: null,
+      });
+
+      let diff: PredictionDiffResult | null = null;
+      if (previousSet) {
+        diff = buildDiffResult(previousSet, picks, gc.mainCount);
+      }
+
+      res.json(apiResponse(draws, { picks, predictionSetId: saved.id, diff }));
     } catch (error: any) {
       res.status(500).json({ ok: false, message: error.message });
     }
