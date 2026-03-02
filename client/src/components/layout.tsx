@@ -25,7 +25,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
   const gameFormat = activeGame
     ? `${activeGame.mainCount}+${activeGame.specialCount}${activeGame.hasSupplementary ? `+${activeGame.supplementaryCount}s` : ""}`
-    : "7+1";
+    : "";
 
   return (
     <div className="min-h-screen flex w-full bg-background overflow-hidden">
@@ -87,7 +87,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
           </h2>
           <div className="ml-auto flex items-center space-x-4">
             <span className="text-xs font-mono text-muted-foreground" data-testid="text-game-format">
-              {activeGame?.displayName?.toUpperCase() || "POWERBALL"} : {gameFormat}
+              {activeGame?.displayName?.toUpperCase() || "LOTTO"}{gameFormat ? ` : ${gameFormat}` : ""}
             </span>
             <span className="text-xs font-mono px-2 py-1 bg-primary/10 text-primary rounded-md border border-primary/20">v2.0.0</span>
           </div>

@@ -936,7 +936,9 @@ export default function PickGenerator() {
                   <div className="flex items-center text-muted-foreground"><CheckCircle className="w-3 h-3 mr-2 text-green-500" /> <Tip label="Sequence detection" tip="Penalises consecutive number runs like 5-6-7. Sequences are a common player favourite, so avoiding them means fewer co-winners." className="text-muted-foreground" /></div>
                   <div className="flex items-center text-muted-foreground"><CheckCircle className="w-3 h-3 mr-2 text-green-500" /> <Tip label="Repeated endings" tip="Penalises picks where multiple numbers share the same last digit (e.g. 5, 15, 25). These patterns are popular with players." className="text-muted-foreground" /></div>
                   <div className="flex items-center text-muted-foreground"><CheckCircle className="w-3 h-3 mr-2 text-green-500" /> <Tip label="Aesthetic pattern" tip="Penalises visually 'neat' patterns people tend to pick, like evenly spaced numbers or symmetric arrangements on the ticket grid." className="text-muted-foreground" /></div>
-                  <div className="flex items-center text-muted-foreground"><CheckCircle className="w-3 h-3 mr-2 text-green-500" /> <Tip label="Low Powerball bias" tip="Penalises very low Powerball numbers (1–5). Many players gravitate to small numbers for the Powerball, increasing split risk." className="text-muted-foreground" /></div>
+                  {showSpecialBall && (
+                  <div className="flex items-center text-muted-foreground"><CheckCircle className="w-3 h-3 mr-2 text-green-500" /> <Tip label={`Low ${activeGame?.specialName || "Powerball"} bias`} tip={`Penalises very low ${activeGame?.specialName || "Powerball"} numbers (1–5). Many players gravitate to small numbers, increasing split risk.`} className="text-muted-foreground" /></div>
+                  )}
                 </CardContent>
               </Card>
             </div>
@@ -1029,7 +1031,7 @@ export default function PickGenerator() {
                           {pick.antiPopBreakdown.sequencePenalty > 0 && <span className="text-orange-400">Sequence -{pick.antiPopBreakdown.sequencePenalty}</span>}
                           {pick.antiPopBreakdown.repeatedEndingPenalty > 0 && <span className="text-orange-400">Endings -{pick.antiPopBreakdown.repeatedEndingPenalty}</span>}
                           {pick.antiPopBreakdown.aestheticPenalty > 0 && <span className="text-orange-400">Pattern -{pick.antiPopBreakdown.aestheticPenalty}</span>}
-                          {pick.antiPopBreakdown.lowPowerballPenalty > 0 && <span className="text-orange-400">Low PB -{pick.antiPopBreakdown.lowPowerballPenalty}</span>}
+                          {showSpecialBall && pick.antiPopBreakdown.lowPowerballPenalty > 0 && <span className="text-orange-400">Low {activeGame?.specialName || "PB"} -{pick.antiPopBreakdown.lowPowerballPenalty}</span>}
                           {Object.values(pick.antiPopBreakdown).every(v => v === 0) && <span className="text-green-500">None (clean pick)</span>}
                         </div>
                       )}

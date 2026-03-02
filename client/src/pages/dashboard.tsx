@@ -104,7 +104,7 @@ function explainDelta(delta: number, windowsBeating: number, windowsTested: numb
 }
 
 export default function Dashboard() {
-  const { activeGameId } = useGame();
+  const { activeGameId, activeGame } = useGame();
   const { data: overview } = useQuery<OverviewData>({
     queryKey: ["/api/system/overview", activeGameId],
     queryFn: () => fetchApi(`/api/system/overview?gameId=${activeGameId}`),
@@ -159,7 +159,7 @@ export default function Dashboard() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold font-mono" data-testid="text-modern-draws">{overview?.modernDraws?.toLocaleString() ?? "0"}</div>
-            <p className="text-xs text-muted-foreground mt-1 font-mono">{hasData ? "7+1 format" : "Awaiting data"}</p>
+            <p className="text-xs text-muted-foreground mt-1 font-mono">{hasData ? (activeGame?.hasSupplementary ? `${activeGame.mainCount}+${activeGame.supplementaryCount}s format` : `${activeGame?.mainCount ?? 7}+${activeGame?.specialCount ?? 1} format`) : "Awaiting data"}</p>
           </CardContent>
         </Card>
 
@@ -231,7 +231,7 @@ export default function Dashboard() {
         <Card className="border-border flex flex-col">
           <CardHeader>
             <CardTitle>Recent Draws</CardTitle>
-            <CardDescription>AU Modern Format: 7 mains + Powerball</CardDescription>
+            <CardDescription>{activeGame ? `${activeGame.displayName}: ${activeGame.mainCount} mains${activeGame.hasSupplementary ? ` + ${activeGame.supplementaryCount} supps` : ` + ${activeGame.specialName}`}` : "Modern Format"}</CardDescription>
           </CardHeader>
           <CardContent className="flex-1 flex flex-col">
             {recentDraws.length > 0 ? (
@@ -248,9 +248,20 @@ export default function Dashboard() {
                           {n.toString().padStart(2, '0')}
                         </div>
                       ))}
-                      <div className="w-8 h-8 rounded bg-primary/20 text-primary border border-primary/30 flex items-center justify-center font-mono text-sm font-bold ml-1">
-                        {draw.powerball.toString().padStart(2, '0')}
-                      </div>
+                      {!activeGame?.hasSupplementary && (
+                        <div className="w-8 h-8 rounded bg-primary/20 text-primary border border-primary/30 flex items-center justify-center font-mono text-sm font-bold ml-1">
+                          {draw.powerball.toString().padStart(2, '0')}
+                        </div>
+                      )}
+                      {activeGame?.hasSupplementary && draw.supplementary && (
+                        <div className="flex space-x-1 ml-1">
+                          {(draw.supplementary as number[]).map((s: number, si: number) => (
+                            <div key={si} className="w-8 h-8 rounded bg-yellow-500/15 text-yellow-400 border border-yellow-500/30 flex items-center justify-center font-mono text-sm">
+                              {s.toString().padStart(2, '0')}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}

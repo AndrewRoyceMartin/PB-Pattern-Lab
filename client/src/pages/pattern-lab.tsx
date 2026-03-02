@@ -123,7 +123,7 @@ function AuditCard({ audit, title }: { audit: AuditSummary; title: string }) {
 
 export default function PatternLab() {
   const [sortPreset, setSortPreset] = useState<SortPreset>("default");
-  const { activeGameId } = useGame();
+  const { activeGameId, activeGame } = useGame();
 
   const { data: stats } = useQuery({ queryKey: ["/api/stats", activeGameId], queryFn: () => fetchApi(`/api/stats?gameId=${activeGameId}`) });
   const { data: freqs } = useQuery<NumberFrequency[]>({ queryKey: ["/api/analysis/frequencies", activeGameId], queryFn: () => fetchApi(`/api/analysis/frequencies?gameId=${activeGameId}`), enabled: !!stats?.modernDraws });
@@ -211,7 +211,7 @@ export default function PatternLab() {
       {hasData && audit && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <AuditCard audit={audit.main} title="Main Numbers Audit" />
-          <AuditCard audit={audit.powerball} title="Powerball Audit" />
+          <AuditCard audit={audit.powerball} title={`${activeGame?.specialName || "Powerball"} Audit`} />
         </div>
       )}
 

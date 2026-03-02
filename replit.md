@@ -9,7 +9,7 @@ Preferred communication style: Simple, everyday language.
 ## System Architecture
 
 ### Multi-Game Support
-The application supports multiple lottery games (AU Powerball, AU Saturday Lotto) via a `GameConfig` interface that parameterizes all analysis and generation functions, ensuring adaptability without hardcoding game-specific rules. A React `GameProvider` manages the active game context.
+The application supports multiple lottery games (AU Powerball, AU Saturday Lotto) via a `GameConfig` interface that parameterizes all analysis and generation functions, ensuring adaptability without hardcoding game-specific rules. A React `GameProvider` manages the active game context. All UI pages are game-aware: Dashboard shows game-specific format labels and renders supplementary balls (yellow) for Saturday Lotto instead of Powerball (primary). Pick Generator hides the special ball display and PB Coverage selector for supplementary-based games. Pattern Lab uses dynamic audit titles. The header bar shows the active game name and format dynamically.
 
 ### Data Sources
 Primary data is sourced from TheLott public JSON API, with fallback mechanisms including HTML scraping of TheLott website and Lottolyzer RSS for historical bulk imports. CSV upload is also supported. Rate limiting and caching are implemented for external API calls.

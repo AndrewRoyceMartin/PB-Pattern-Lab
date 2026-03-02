@@ -32,10 +32,10 @@ export default function Ingest() {
   const isPowerball = activeGameId === "AU_POWERBALL";
   const isSaturdayLotto = activeGameId === "AU_SATURDAY_LOTTO";
 
-  const gameName = activeGame?.displayName || "Powerball";
+  const gameName = activeGame?.displayName || "Lottery";
   const gameFormat = activeGame
-    ? `${activeGame.mainCount} from ${activeGame.mainPool} + ${activeGame.specialName} ${activeGame.specialCount} from ${activeGame.specialPool}`
-    : "7 from 35 + Powerball 1 from 20";
+    ? `${activeGame.mainCount} from ${activeGame.mainPool}${activeGame.hasSupplementary ? ` + ${activeGame.supplementaryCount} supps from ${activeGame.supplementaryPool}` : ` + ${activeGame.specialName} ${activeGame.specialCount} from ${activeGame.specialPool}`}`
+    : "Loading...";
 
   const handleFile = async (file: File) => {
     setIsUploading(true);
