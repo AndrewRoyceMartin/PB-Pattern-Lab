@@ -1,15 +1,161 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Zap, Play, CheckCircle, SearchX, Loader2, Info, Sparkles, AlertTriangle, ArrowRight, Shield, Rocket, Download, ChevronDown, ChevronUp, Trophy, Beaker, Settings2 } from "lucide-react";
+import { Zap, Play, CheckCircle, SearchX, Loader2, Info, Sparkles, AlertTriangle, ArrowRight, Shield, Rocket, Download, ChevronDown, ChevronUp, Trophy, Beaker, Settings2, ArrowUp, ArrowDown, Minus, RotateCcw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { generatePicks, fetchApi, fetchRecommendation, runAutoGenerate, runAutoCompositeNoFrequency, runAutoOptimiseAndGenerate } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
 import type { GeneratedPick, GeneratorMode, GeneratorRecommendation } from "@shared/schema";
 import { HelpTip } from "@/components/help-tip";
 import { useGame } from "@/contexts/game-context";
+
+interface StoredRun {
+  picks: GeneratedPick[];
+  generatedAt: string;
+  strategyName?: string;
+  mode: "simple" | "advanced";
+}
+
+function getStorageKey(gameId: string) {
+  return `pb_previous_run_${gameId}`;
+}
+
+function loadPreviousRun(gameId: string): StoredRun | null {
+  try {
+    const raw = localStorage.getItem(getStorageKey(gameId));
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function savePreviousRun(gameId: string, run: StoredRun): void {
+  try {
+    localStorage.setItem(getStorageKey(gameId), JSON.stringify(run));
+  } catch {}
+}
+
+interface LineDiff {
+  newNumbers: Set<number>;
+  droppedNumbers: Set<number>;
+  keptNumbers: Set<number>;
+  pbChanged: boolean;
+  prevPb: number | null;
+  drawFitDelta: number | null;
+  antiPopDelta: number | null;
+  scoreDelta: number | null;
+}
+
+function computeLineDiff(current: GeneratedPick, previous: GeneratedPick | undefined): LineDiff | null {
+  if (!previous) return null;
+  const prevSet = new Set(previous.numbers);
+  const curSet = new Set(current.numbers);
+  return {
+    newNumbers: new Set([...curSet].filter(n => !prevSet.has(n))),
+    droppedNumbers: new Set([...prevSet].filter(n => !curSet.has(n))),
+    keptNumbers: new Set([...curSet].filter(n => prevSet.has(n))),
+    pbChanged: current.powerball !== previous.powerball,
+    prevPb: previous.powerball,
+    drawFitDelta: current.drawFit - previous.drawFit,
+    antiPopDelta: current.antiPop - previous.antiPop,
+    scoreDelta: current.finalScore - previous.finalScore,
+  };
+}
+
+function DeltaIndicator({ value, label }: { value: number | null; label: string }) {
+  if (value === null || Math.abs(value) < 0.05) return null;
+  const isUp = value > 0;
+  return (
+    <span className={`inline-flex items-center gap-0.5 text-[10px] font-mono ${isUp ? "text-green-400" : "text-red-400"}`} title={`${label} change from previous run`}>
+      {isUp ? <ArrowUp className="w-2.5 h-2.5" /> : <ArrowDown className="w-2.5 h-2.5" />}
+      {isUp ? "+" : ""}{value.toFixed(1)}
+    </span>
+  );
+}
+
+function ChangesSummary({ currentPicks, previousRun }: { currentPicks: GeneratedPick[]; previousRun: StoredRun }) {
+  const totalCurrent = new Set(currentPicks.flatMap(p => p.numbers));
+  const totalPrevious = new Set(previousRun.picks.flatMap(p => p.numbers));
+  const newNums = [...totalCurrent].filter(n => !totalPrevious.has(n)).sort((a, b) => a - b);
+  const droppedNums = [...totalPrevious].filter(n => !totalCurrent.has(n)).sort((a, b) => a - b);
+  const keptNums = [...totalCurrent].filter(n => totalPrevious.has(n));
+
+  const overlapPct = totalPrevious.size > 0 ? Math.round((keptNums.length / totalPrevious.size) * 100) : 0;
+
+  const avgScoreCurrent = currentPicks.reduce((s, p) => s + p.finalScore, 0) / currentPicks.length;
+  const avgScorePrevious = previousRun.picks.reduce((s, p) => s + p.finalScore, 0) / previousRun.picks.length;
+  const avgScoreDelta = avgScoreCurrent - avgScorePrevious;
+
+  const prevDate = new Date(previousRun.generatedAt);
+  const timeAgo = formatTimeAgo(prevDate);
+
+  return (
+    <Card className="border-border/50 bg-secondary/5" data-testid="card-changes-summary">
+      <CardContent className="pt-4 pb-3 space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-sm">
+            <RotateCcw className="w-4 h-4 text-primary" />
+            <span className="font-medium">Changes from Previous Run</span>
+          </div>
+          <span className="text-[10px] font-mono text-muted-foreground/60">{timeAgo}</span>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div>
+            <div className="text-[10px] text-muted-foreground/70 uppercase tracking-wide">Overlap</div>
+            <div className="text-sm font-bold font-mono mt-0.5">{overlapPct}%</div>
+          </div>
+          <div>
+            <div className="text-[10px] text-muted-foreground/70 uppercase tracking-wide">New Numbers</div>
+            <div className="text-sm font-bold font-mono mt-0.5 text-green-400">{newNums.length}</div>
+          </div>
+          <div>
+            <div className="text-[10px] text-muted-foreground/70 uppercase tracking-wide">Dropped</div>
+            <div className="text-sm font-bold font-mono mt-0.5 text-red-400">{droppedNums.length}</div>
+          </div>
+          <div>
+            <div className="text-[10px] text-muted-foreground/70 uppercase tracking-wide">Avg Score</div>
+            <div className={`text-sm font-bold font-mono mt-0.5 ${avgScoreDelta > 0 ? "text-green-400" : avgScoreDelta < 0 ? "text-red-400" : "text-muted-foreground"}`}>
+              {avgScoreDelta >= 0 ? "+" : ""}{avgScoreDelta.toFixed(1)}
+            </div>
+          </div>
+        </div>
+
+        {(newNums.length > 0 || droppedNums.length > 0) && (
+          <div className="flex flex-wrap gap-2 text-xs font-mono border-t border-border/30 pt-2">
+            {newNums.length > 0 && (
+              <div className="flex items-center gap-1 flex-wrap">
+                <span className="text-muted-foreground/60">New:</span>
+                {newNums.map(n => (
+                  <span key={n} className="px-1.5 py-0.5 rounded bg-green-500/20 text-green-400 border border-green-500/30">{n.toString().padStart(2, '0')}</span>
+                ))}
+              </div>
+            )}
+            {droppedNums.length > 0 && (
+              <div className="flex items-center gap-1 flex-wrap ml-2">
+                <span className="text-muted-foreground/60">Dropped:</span>
+                {droppedNums.map(n => (
+                  <span key={n} className="px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/30 line-through">{n.toString().padStart(2, '0')}</span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function formatTimeAgo(date: Date): string {
+  const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
 
 function Tip({ label, tip, className }: { label: string; tip: string; className?: string }) {
   return (
@@ -99,21 +245,43 @@ function RunStampCard({ stamp }: { stamp: RunStamp }) {
   );
 }
 
-function GameLine({ pick, index }: { pick: GeneratedPick; index: number }) {
+function GameLine({ pick, index, diff }: { pick: GeneratedPick; index: number; diff?: LineDiff | null }) {
   return (
     <div className={`flex items-center gap-3 py-2.5 px-3 rounded-lg ${index === 0 ? 'bg-primary/5 border border-primary/20' : 'bg-card/50'}`} data-testid={`auto-game-${index + 1}`}>
       <span className="font-mono font-bold text-muted-foreground w-16 text-sm shrink-0">Game {index + 1}</span>
       <div className="flex gap-1.5">
-        {pick.numbers.map((n, idx) => (
-          <div key={idx} className="w-9 h-9 rounded bg-secondary flex items-center justify-center font-mono text-sm border border-border/80 shadow-sm">
-            {n.toString().padStart(2, '0')}
-          </div>
-        ))}
-        <div className="w-9 h-9 rounded bg-primary/20 text-primary border border-primary/30 flex items-center justify-center font-mono text-sm font-bold shadow-sm ml-1 relative">
+        {pick.numbers.map((n, idx) => {
+          const isNew = diff?.newNumbers.has(n);
+          return (
+            <div
+              key={idx}
+              className={`w-9 h-9 rounded flex items-center justify-center font-mono text-sm border shadow-sm transition-all ${
+                isNew
+                  ? "bg-green-500/20 border-green-500/50 text-green-300 ring-1 ring-green-500/30"
+                  : "bg-secondary border-border/80"
+              }`}
+              title={isNew ? "New this run" : undefined}
+            >
+              {n.toString().padStart(2, '0')}
+            </div>
+          );
+        })}
+        <div className={`w-9 h-9 rounded flex items-center justify-center font-mono text-sm font-bold shadow-sm ml-1 relative ${
+          diff?.pbChanged
+            ? "bg-green-500/20 text-green-300 border border-green-500/50 ring-1 ring-green-500/30"
+            : "bg-primary/20 text-primary border border-primary/30"
+        }`}>
           <Zap className="w-3 h-3 absolute -top-1 -right-1 text-yellow-500" />
           {pick.powerball.toString().padStart(2, '0')}
         </div>
       </div>
+      {diff && (diff.newNumbers.size > 0 || diff.pbChanged) && (
+        <span className="text-[10px] font-mono text-green-400/70 ml-1">
+          {diff.newNumbers.size > 0 && `${diff.newNumbers.size} new`}
+          {diff.newNumbers.size > 0 && diff.pbChanged && " · "}
+          {diff.pbChanged && `PB ${diff.prevPb?.toString().padStart(2,'0')}→${pick.powerball.toString().padStart(2,'0')}`}
+        </span>
+      )}
     </div>
   );
 }
@@ -292,6 +460,27 @@ export default function PickGenerator() {
   const [showDetails, setShowDetails] = useState(false);
 
   const { activeGameId } = useGame();
+  const [previousRun, setPreviousRun] = useState<StoredRun | null>(null);
+
+  useEffect(() => {
+    setPreviousRun(loadPreviousRun(activeGameId));
+  }, [activeGameId]);
+
+  const saveCurrentAsPrevious = useCallback((newPicks: GeneratedPick[], strategyName?: string, mode: "simple" | "advanced" = "simple") => {
+    const run: StoredRun = { picks: newPicks, generatedAt: new Date().toISOString(), strategyName, mode };
+    setPreviousRun(loadPreviousRun(activeGameId));
+    savePreviousRun(activeGameId, run);
+  }, [activeGameId]);
+
+  const simpleLineDiffs = useMemo(() => {
+    if (!simpleResult?.picks || !previousRun?.picks) return null;
+    return simpleResult.picks.map((pick, i) => computeLineDiff(pick, previousRun.picks[i]));
+  }, [simpleResult, previousRun]);
+
+  const advancedLineDiffs = useMemo(() => {
+    if (!picks.length || !previousRun?.picks) return null;
+    return picks.map((pick, i) => computeLineDiff(pick, previousRun.picks[i]));
+  }, [picks, previousRun]);
   const { data: stats } = useQuery({ queryKey: ["/api/stats", activeGameId], queryFn: () => fetchApi(`/api/stats?gameId=${activeGameId}`) });
   const { data: recommendation } = useQuery<GeneratorRecommendation>({
     queryKey: ["/api/generator/recommendation", activeGameId],
@@ -312,6 +501,7 @@ export default function PickGenerator() {
     setSimpleResult(null);
     try {
       const result = await runAutoCompositeNoFrequency(activeGameId);
+      saveCurrentAsPrevious(result.picks, result.runStamp?.strategyName, "simple");
       setSimpleResult(result);
       toast({ title: "Picks generated", description: "12 lines using Composite No-Frequency." });
     } catch (error: any) {
@@ -330,6 +520,7 @@ export default function PickGenerator() {
       setLaneBStep("Step 1: Running optimiser...");
       const result = await runAutoOptimiseAndGenerate(activeGameId);
       setLaneBStep("");
+      saveCurrentAsPrevious(result.picks, result.runStamp?.strategyName, "simple");
       setSimpleResult(result);
       toast({ title: "Optimised picks generated", description: `12 lines using optimised formula (${result.optimiserMeta?.formulaHash}).` });
     } catch (error: any) {
@@ -348,6 +539,7 @@ export default function PickGenerator() {
     setIsGenerating(true);
     try {
       const result = await generatePicks(selectedMode, drawFitWeight, antiPopWeight, 10, activeGameId);
+      saveCurrentAsPrevious(result, currentMode.strategyName, "advanced");
       setPicks(result);
     } catch (error: any) {
       toast({ title: "Generation failed", description: error.message, variant: "destructive" });
@@ -497,10 +689,14 @@ export default function PickGenerator() {
                 </div>
               )}
 
+              {previousRun && simpleResult.picks && (
+                <ChangesSummary currentPicks={simpleResult.picks} previousRun={previousRun} />
+              )}
+
               <Card className="border-border">
                 <CardContent className="pt-4 space-y-1">
                   {simpleResult.picks.map((pick, i) => (
-                    <GameLine key={i} pick={pick} index={i} />
+                    <GameLine key={i} pick={pick} index={i} diff={simpleLineDiffs?.[i]} />
                   ))}
                 </CardContent>
               </Card>
@@ -776,9 +972,15 @@ export default function PickGenerator() {
                 GENERATED CANDIDATES [{currentMode.label.toUpperCase()}]
               </h3>
 
+              {picks.length > 0 && previousRun && (
+                <ChangesSummary currentPicks={picks} previousRun={previousRun} />
+              )}
+
               {picks.length > 0 ? (
                 <div className="space-y-3">
-                  {picks.map((pick, i) => (
+                  {picks.map((pick, i) => {
+                    const diff = advancedLineDiffs?.[i];
+                    return (
                     <div key={i} className={`p-4 rounded-lg border ${i === 0 ? 'bg-primary/5 border-primary/30' : 'bg-card border-border/50'} relative overflow-hidden group hover:border-primary/50 transition-colors`} data-testid={`card-pick-${pick.rank}`}>
                       {i === 0 && <div className="absolute top-0 right-0 w-16 h-16 bg-primary/10 rounded-bl-full -mr-8 -mt-8 pointer-events-none"></div>}
 
@@ -795,12 +997,23 @@ export default function PickGenerator() {
                             )}
                           </div>
                           <div className="flex space-x-1.5">
-                            {pick.numbers.map((n, idx) => (
-                              <div key={idx} className="w-9 h-9 rounded bg-secondary flex items-center justify-center font-mono text-sm border border-border/80 shadow-sm">
+                            {pick.numbers.map((n, idx) => {
+                              const isNew = diff?.newNumbers.has(n);
+                              return (
+                              <div key={idx} className={`w-9 h-9 rounded flex items-center justify-center font-mono text-sm border shadow-sm ${
+                                isNew
+                                  ? "bg-green-500/20 border-green-500/50 text-green-300 ring-1 ring-green-500/30"
+                                  : "bg-secondary border-border/80"
+                              }`} title={isNew ? "New this run" : undefined}>
                                 {n.toString().padStart(2, '0')}
                               </div>
-                            ))}
-                            <div className="w-9 h-9 rounded bg-primary/20 text-primary border border-primary/30 flex items-center justify-center font-mono text-sm font-bold shadow-sm ml-1 relative">
+                              );
+                            })}
+                            <div className={`w-9 h-9 rounded flex items-center justify-center font-mono text-sm font-bold shadow-sm ml-1 relative ${
+                              diff?.pbChanged
+                                ? "bg-green-500/20 text-green-300 border border-green-500/50 ring-1 ring-green-500/30"
+                                : "bg-primary/20 text-primary border border-primary/30"
+                            }`}>
                               <Zap className="w-3 h-3 absolute -top-1 -right-1 text-yellow-500" />
                               {pick.powerball.toString().padStart(2, '0')}
                             </div>
@@ -810,17 +1023,26 @@ export default function PickGenerator() {
                         <div className="flex items-center space-x-3 ml-12 md:ml-0 font-mono text-xs">
                           <div className="flex flex-col items-end">
                             <Tip label="Draw-Fit" tip="How well these numbers match historical patterns — frequency, recency, structure, and trend signals. Higher = better fit to past draws." className="text-muted-foreground" />
-                            <span className="text-primary">{pick.drawFit}</span>
+                            <div className="flex items-center gap-1">
+                              <span className="text-primary">{pick.drawFit}</span>
+                              <DeltaIndicator value={diff?.drawFitDelta ?? null} label="Draw-Fit" />
+                            </div>
                           </div>
                           <div className="w-px h-8 bg-border"></div>
                           <div className="flex flex-col items-end">
                             <Tip label="Anti-Pop" tip="How unpopular this combination is among typical players. Higher = fewer people likely picked these numbers, meaning less chance of splitting a jackpot." className="text-muted-foreground" />
-                            <span className="text-yellow-500">{pick.antiPop}</span>
+                            <div className="flex items-center gap-1">
+                              <span className="text-yellow-500">{pick.antiPop}</span>
+                              <DeltaIndicator value={diff?.antiPopDelta ?? null} label="Anti-Pop" />
+                            </div>
                           </div>
                           <div className="w-px h-8 bg-border"></div>
                           <div className="flex flex-col items-end">
                             <Tip label="SCORE" tip="The final combined score, blending Draw-Fit and Anti-Pop based on the weights set by your chosen mode. Higher = better overall pick." className="text-muted-foreground font-bold" />
-                            <span className={`font-bold ${i === 0 ? 'text-primary text-base' : ''}`}>{pick.finalScore.toFixed(1)}</span>
+                            <div className="flex items-center gap-1">
+                              <span className={`font-bold ${i === 0 ? 'text-primary text-base' : ''}`}>{pick.finalScore.toFixed(1)}</span>
+                              <DeltaIndicator value={diff?.scoreDelta ?? null} label="Score" />
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -837,7 +1059,8 @@ export default function PickGenerator() {
                         </div>
                       )}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center py-20 text-muted-foreground border border-dashed border-border/50 rounded-lg bg-secondary/10">
