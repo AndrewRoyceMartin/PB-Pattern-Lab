@@ -1,0 +1,43 @@
+Here's a summary you can paste into ChatGPT:
+
+Session Changes — Powerball Pattern Lab
+
+1. Code Review Fixes (Multi-Game Isolation)
+Three issues found and fixed from the previous session's multi-game implementation:
+
+CSV Upload now game-aware: The upload endpoint reads gameId from the form data, passes it to clearDraws(gameId) (so it only clears draws for that game, not all games), and stamps each parsed draw with the correct gameId.
+
+Analysis route fix: The /api/analysis/features endpoint was calling computePatternFeatures(draws) without passing the resolved GameConfig. Now passes gc so Saturday Lotto analysis uses the correct pool sizes (6/45) instead of defaulting to Powerball (7/35).
+
+Benchmark cache scoped by gameId: The global singleton latestBenchmarkResult was replaced with a Map<string, {result, time}> keyed by gameId. All functions that touch the cache — storeBenchmarkResult, loadBenchmarkFromDb, getLatestBenchmarkTime, getGeneratorRecommendation, and generateStrategyPortfolio — now accept and use gameId. All callers in validation.ts, generator.ts, auto.ts, and generator-registry.ts updated. This prevents benchmark results from one game leaking into recommendations for another.
+
+2. TheLott Scraper — Multi-Source Resilience + HTML Fallback
+Multi-company failover: API client now tries 3 company IDs (GoldenCasket, NSWLotteries, SALotteries) in sequence. If one fails, it automatically tries the next.
+
+HTML scrape fallback: If all API sources fail, falls back to fetching the TheLott results page via cheerio. Extraction priority: __NEXT_DATA__ JSON → LD+JSON blocks → HTML element parsing. (Note: the site is currently a pure SPA so the API is the working path; the scrape layer is there as insurance if they add SSR later.)
+
+Rate limiting: 1 request/second enforced across all TheLott calls (API and scrape).
+
+HTML response caching: 60-second TTL cache prevents repeated fetches of the same page.
+
+Strict scrape validation: Scraped draws must have drawNumber > 0, a valid date, and all numbers within correct ranges. Invalid entries are silently dropped — no corrupt data gets inserted.
+
+Source transparency: Sync response now includes source: "api" | "scrape". The ingest page shows an API or SCRAPE badge on results so the user knows which path was used.
+
+New types file: server/sources/thelott/types.ts with NormalizedDraw, SyncResult, ScrapedDrawData interfaces.
+
+Files Changed
+server/sources/thelott/common.ts — Rewritten with multi-source, rate limiting, caching, scrape fallback
+server/sources/thelott/powerball.ts — Returns {draws, source}, adds scrape normalization with validation
+server/sources/thelott/saturdayLotto.ts — Same pattern as Powerball
+server/sources/thelott/types.ts — New shared types
+server/routes/sync.ts — Uses new return format, passes source to response
+server/routes/analysis.ts — Fixed gc propagation to computePatternFeatures
+server/routes/validation.ts — Passes gameId to storeBenchmarkResult
+server/routes/generator.ts — Passes gameId to cache functions and recommendation
+server/routes/auto.ts — Passes gameId to storeBenchmarkResult
+server/routes/upload.ts — Reads gameId from form body, passes to clearDraws and draw inserts
+server/analysis.ts — Benchmark cache refactored from singleton to Map<gameId>
+server/generator-registry.ts — Added gameId to handler context, passed to portfolio generator
+client/src/pages/ingest.tsx — Shows API/SCRAPE source badge on sync results
+replit.md — Updated documentation
