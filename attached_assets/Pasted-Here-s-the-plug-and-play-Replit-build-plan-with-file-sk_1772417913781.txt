@@ -1,0 +1,259 @@
+Here’s the plug-and-play Replit build plan with file skeletons, endpoints, and the normalization rules. No fluff.
+
+Replit Patch: TheLott Scrapers (Powerball + Saturday Lotto)
+Dependencies
+
+Add these to the server (if not already):
+
+cheerio (HTML fallback parser)
+
+1) File structure to add
+
+Create:
+
+server/sources/thelott/common.ts
+
+server/sources/thelott/powerball.ts
+
+server/sources/thelott/saturdayLotto.ts
+
+server/sources/thelott/types.ts
+
+And a small route module:
+
+server/routes/syncThelott.ts
+
+2) Shared types
+server/sources/thelott/types.ts
+
+Define:
+
+NormalizedDraw
+
+SyncResult
+
+Fields:
+
+gameId: string
+
+drawNumber?: string
+
+drawDateTimeISO: string (ISO8601)
+
+mainNumbers: number[]
+
+specialBalls?: Record<string, number> (Powerball)
+
+supplementaries?: number[] (Saturday Lotto)
+
+sourceUrl: string
+
+raw?: any (optional debug)
+
+3) Common scraper utilities (JSON-first, HTML fallback)
+server/sources/thelott/common.ts
+
+Implement these functions:
+
+fetchHtml(url)
+
+GET page with headers:
+
+User-Agent: Mozilla/5.0 …
+
+Accept-Language: en-AU,en;q=0.9
+
+Accept: text/html,*/*
+
+extractNextData(html)
+
+Look for <script id="__NEXT_DATA__" type="application/json">
+
+Parse JSON
+
+extractLdJson(html)
+
+Collect <script type="application/ld+json"> blocks
+
+Parse JSONs (some are arrays)
+
+extractJsonCandidates(html)
+
+Returns array of candidates from NEXT_DATA + LD_JSON
+
+fallbackHtmlParse(html)
+
+Use cheerio to find “Winning numbers” blocks (only used if no JSON works)
+
+Important: JSON-first will be more stable long-term.
+
+4) Game-specific parsers
+A) Powerball
+server/sources/thelott/powerball.ts
+
+SOURCE_URL = "https://www.thelott.com/powerball/results"
+
+GAME_ID = "AU_POWERBALL"
+
+Functions:
+
+fetchLatestDraws(maxPages):
+
+fetch results page
+
+extract JSON candidates
+
+locate draw payload
+
+normalize to NormalizedDraw[]
+
+Normalization rules:
+
+mainNumbers: first 7 mains (1–35)
+
+specialBalls.Powerball: 1–20
+
+ignore multipliers
+
+If JSON provides “previous results” pagination links:
+
+follow them until:
+
+maxPages reached, or
+
+stopIfSeen finds a draw already in DB
+
+B) Saturday Lotto
+server/sources/thelott/saturdayLotto.ts
+
+SOURCE_URL = "https://www.thelott.com/saturday-lotto/results"
+
+GAME_ID = "AU_SATURDAY_LOTTO"
+
+Normalization rules (common AU Saturday Lotto):
+
+mainNumbers: 6 numbers (1–45)
+
+supplementaries: 2 numbers (1–45), stored as array
+
+no special ball like PB
+
+Same pagination logic.
+
+5) Database: ensure games exist
+
+Add/ensure these rows in games table:
+
+AU_POWERBALL
+
+mainCount=7, mainMax=35
+
+specialBalls: [{name:"Powerball", count:1, max:20}]
+
+AU_SATURDAY_LOTTO
+
+mainCount=6, mainMax=45
+
+supplementaries=2 (store in extras metadata)
+
+6) Draw storage (upsert)
+
+When saving normalized draws:
+
+Unique constraint: (gameId, drawDateTimeISO) OR (gameId, drawNumber) if you have drawNumber consistently.
+
+Store:
+
+mainNumbers JSON
+
+specialBalls JSON (nullable)
+
+supplementaries JSON (nullable)
+
+sourceUrl
+
+raw optional (debug off by default)
+
+7) Sync endpoints
+Add routes in server/routes/syncThelott.ts
+
+Endpoints:
+
+POST /api/sync/thelott/powerball
+
+Body:
+
+{ "maxPages": 20, "stopIfSeen": true }
+POST /api/sync/thelott/saturday-lotto
+
+Body:
+
+{ "maxPages": 20, "stopIfSeen": true }
+
+Response:
+
+gameId
+
+fetchedCount
+
+insertedCount
+
+skippedCount
+
+latestDrawDate
+
+errors (if any)
+
+8) UI: add Sync buttons (simple)
+
+On your ingest page:
+
+“Sync Powerball (The Lott)”
+
+“Sync Saturday Lotto (The Lott)”
+
+Show:
+
+last sync time
+
+draws added
+
+latest draw date in DB for each game
+
+9) Make it selectable at startup (if not already)
+
+On startup:
+
+load /api/games
+
+show modal:
+
+Powerball
+
+Saturday Lotto
+
+store activeGameId
+
+all analysis/validation/generator endpoints filter by activeGameId
+
+10) Safety / reliability
+
+Rate limit: 1 request/sec to The Lott
+
+Cache HTML for 60 seconds to avoid spamming
+
+Fail gracefully: “Could not parse results – site format changed”
+
+Acceptance checklist (quick)
+
+Sync Powerball inserts latest draw and at least N previous draws
+
+Sync Saturday Lotto inserts latest draw and previous draws
+
+No duplicates on repeated sync
+
+Game selector switches analysis correctly
+
+Validation and generator work per-game
+
+If you want, I’ll also give you the exact parsing strategy once you paste one sample HTML page source (or the extracted __NEXT_DATA__ blob) from each results page, because the internal JSON path (where the draw numbers sit) depends on their Next.js payload structure.
