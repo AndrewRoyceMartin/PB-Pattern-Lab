@@ -11,7 +11,7 @@ import type { GeneratedPick, GeneratorMode, GeneratorRecommendation, PredictionD
 import { HelpTip } from "@/components/help-tip";
 import { useGame } from "@/contexts/game-context";
 
-function ChangesSummary({ diff }: { diff: PredictionDiffResult }) {
+function ChangesSummary({ diff, showSpecialBall = true }: { diff: PredictionDiffResult; showSpecialBall?: boolean }) {
   const { summary } = diff;
   const timeAgo = formatTimeAgo(new Date(diff.previousGeneratedAt));
   const [showRemoved, setShowRemoved] = useState(false);
@@ -29,15 +29,17 @@ function ChangesSummary({ diff }: { diff: PredictionDiffResult }) {
           </span>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className={`grid grid-cols-2 ${showSpecialBall ? "md:grid-cols-4" : "md:grid-cols-3"} gap-3`}>
           <div>
             <div className="text-[10px] text-muted-foreground/70 uppercase tracking-wide">Mains Changed</div>
             <div className="text-sm font-bold font-mono mt-0.5">{summary.mainsPercentChanged}%</div>
           </div>
+          {showSpecialBall && (
           <div>
             <div className="text-[10px] text-muted-foreground/70 uppercase tracking-wide">PBs Changed</div>
             <div className="text-sm font-bold font-mono mt-0.5">{summary.pbPercentChanged}%</div>
           </div>
+          )}
           <div>
             <div className="text-[10px] text-muted-foreground/70 uppercase tracking-wide">New Mains</div>
             <div className="text-sm font-bold font-mono mt-0.5 text-green-400">{summary.newMains.length}</div>
@@ -72,7 +74,7 @@ function ChangesSummary({ diff }: { diff: PredictionDiffResult }) {
           </div>
         )}
 
-        {(summary.newPBs.length > 0 || summary.removedPBs.length > 0) && (
+        {showSpecialBall && (summary.newPBs.length > 0 || summary.removedPBs.length > 0) && (
           <div className="flex flex-wrap gap-2 text-xs font-mono border-t border-border/30 pt-2">
             {summary.newPBs.length > 0 && (
               <div className="flex items-center gap-1 flex-wrap">
@@ -190,7 +192,7 @@ function RunStampCard({ stamp }: { stamp: RunStamp }) {
   );
 }
 
-function GameLine({ pick, index, lineMapping }: { pick: GeneratedPick; index: number; lineMapping?: LineDiffMapping | null }) {
+function GameLine({ pick, index, lineMapping, showSpecialBall = true }: { pick: GeneratedPick; index: number; lineMapping?: LineDiffMapping | null; showSpecialBall?: boolean }) {
   const addedSet = useMemo(() => lineMapping ? new Set(lineMapping.addedMains) : new Set<number>(), [lineMapping]);
 
   return (
@@ -213,6 +215,7 @@ function GameLine({ pick, index, lineMapping }: { pick: GeneratedPick; index: nu
             </div>
           );
         })}
+        {showSpecialBall && (
         <div className={`w-9 h-9 rounded flex items-center justify-center font-mono text-sm font-bold shadow-sm ml-1 relative ${
           lineMapping?.pbChanged
             ? "bg-green-500/20 text-green-300 border border-green-500/50 ring-1 ring-green-500/30"
@@ -221,11 +224,12 @@ function GameLine({ pick, index, lineMapping }: { pick: GeneratedPick; index: nu
           <Zap className="w-3 h-3 absolute -top-1 -right-1 text-yellow-500" />
           {pick.powerball.toString().padStart(2, '0')}
         </div>
+        )}
       </div>
-      {lineMapping && (lineMapping.addedMains.length > 0 || lineMapping.pbChanged) && (
+      {lineMapping && (lineMapping.addedMains.length > 0 || (showSpecialBall && lineMapping.pbChanged)) && (
         <span className="text-[10px] font-mono text-green-400/70 ml-1">
           {lineMapping.linePercentChanged}% changed
-          {lineMapping.pbChanged && " · PB changed"}
+          {showSpecialBall && lineMapping.pbChanged && " · PB changed"}
         </span>
       )}
     </div>
@@ -342,10 +346,12 @@ function StabilityBadge({ stabilityClass }: { stabilityClass: string }) {
   return <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-mono font-bold ${c.className}`}>{c.label}</span>;
 }
 
-function exportCSVLines(result: SimpleResult) {
+function exportCSVLines(result: SimpleResult, showSpecialBall: boolean = true) {
+  const mainHeaders = result.picks[0]?.numbers.map((_, i) => `N${i + 1}`).join(",") || "N1,N2,N3,N4,N5,N6,N7";
+  const header = showSpecialBall ? `Game,${mainHeaders},PB` : `Game,${mainHeaders}`;
   const lines = [
-    "Game,N1,N2,N3,N4,N5,N6,N7,PB",
-    ...result.picks.map((p, i) => `${i + 1},${p.numbers.join(",")},${p.powerball}`),
+    header,
+    ...result.picks.map((p, i) => showSpecialBall ? `${i + 1},${p.numbers.join(",")},${p.powerball}` : `${i + 1},${p.numbers.join(",")}`),
     "",
     `Strategy,${result.runStamp.strategyName}`,
     `Optimiser,${result.runStamp.optimiserUsed ? "ON" : "OFF"}`,
@@ -406,7 +412,7 @@ export default function PickGenerator() {
   const [showDetails, setShowDetails] = useState(false);
   const [pbMode, setPbMode] = useState<"default" | "unique_spread" | "guaranteed">("default");
 
-  const { activeGameId } = useGame();
+  const { activeGameId, activeGame } = useGame();
   const [simpleDiff, setSimpleDiff] = useState<PredictionDiffResult | null>(null);
   const [advancedDiff, setAdvancedDiff] = useState<PredictionDiffResult | null>(null);
   const { data: stats } = useQuery({ queryKey: ["/api/stats", activeGameId], queryFn: () => fetchApi(`/api/stats?gameId=${activeGameId}`) });
@@ -418,6 +424,8 @@ export default function PickGenerator() {
     refetchOnMount: "always",
   });
   const hasData = stats?.modernDraws > 0;
+
+  const showSpecialBall = !activeGame?.hasSupplementary;
 
   const currentMode = MODES.find(m => m.value === selectedMode)!;
   const drawFitWeight = selectedMode === "balanced" ? 100 - customAntiPop[0] : currentMode.drawFit;
@@ -505,7 +513,7 @@ export default function PickGenerator() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight" data-testid="text-generator-title">Pick Generator</h1>
           <p className="text-muted-foreground mt-2 font-mono text-sm">
-            Generate 12 picks for a Powerball card. Choose your lane below.
+            Generate 12 picks for a {activeGame?.displayName || "lottery"} card. Choose your lane below.
           </p>
         </div>
         <div className="flex gap-2">
@@ -532,12 +540,13 @@ export default function PickGenerator() {
 
       {viewMode === "simple" && (
         <>
+          {activeGame && !activeGame.hasSupplementary && (
           <div className="flex items-center gap-3 text-xs font-mono" data-testid="pb-mode-selector">
-            <span className="text-muted-foreground">PB Coverage:</span>
+            <span className="text-muted-foreground">{activeGame?.specialName || "PB"} Coverage:</span>
             {([
-              { value: "default" as const, label: "Default", tip: "Powerball chosen by strategy" },
-              { value: "unique_spread" as const, label: "Unique Spread", tip: "No duplicate PBs across 12 lines" },
-              { value: "guaranteed" as const, label: "Full Coverage", tip: "All PB values 1-20 covered (needs 20+ lines)" },
+              { value: "default" as const, label: "Default", tip: `${activeGame?.specialName || "Powerball"} chosen by strategy` },
+              { value: "unique_spread" as const, label: "Unique Spread", tip: `No duplicate ${activeGame?.specialName || "PB"}s across 12 lines` },
+              { value: "guaranteed" as const, label: "Full Coverage", tip: `All ${activeGame?.specialName || "PB"} values 1-${activeGame?.specialPool || 20} covered` },
             ] as const).map(opt => (
               <button
                 key={opt.value}
@@ -554,6 +563,7 @@ export default function PickGenerator() {
               </button>
             ))}
           </div>
+          )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Card className="border-green-500/30 bg-green-500/5" data-testid="card-lane-a">
@@ -653,14 +663,14 @@ export default function PickGenerator() {
               )}
 
               {simpleDiff && (
-                <ChangesSummary diff={simpleDiff} />
+                <ChangesSummary diff={simpleDiff} showSpecialBall={showSpecialBall} />
               )}
 
               <Card className="border-border">
                 <CardContent className="pt-4 space-y-1">
                   {simpleResult.picks.map((pick, i) => {
                     const lm = simpleDiff?.lineMapping?.find(m => m.currentIndex === i);
-                    return <GameLine key={i} pick={pick} index={i} lineMapping={lm} />;
+                    return <GameLine key={i} pick={pick} index={i} lineMapping={lm} showSpecialBall={showSpecialBall} />;
                   })}
                 </CardContent>
               </Card>
@@ -670,7 +680,7 @@ export default function PickGenerator() {
               </p>
 
               <div className="flex flex-wrap gap-2">
-                <Button variant="outline" size="sm" className="font-mono text-xs" onClick={() => exportCSVLines(simpleResult)} data-testid="button-export-csv">
+                <Button variant="outline" size="sm" className="font-mono text-xs" onClick={() => exportCSVLines(simpleResult, showSpecialBall)} data-testid="button-export-csv">
                   <Download className="w-3 h-3 mr-1.5" /> CSV (12 Lines)
                 </Button>
                 <Button variant="outline" size="sm" className="font-mono text-xs" onClick={() => exportJSON(simpleResult)} data-testid="button-export-json">
@@ -937,7 +947,7 @@ export default function PickGenerator() {
               </h3>
 
               {picks.length > 0 && advancedDiff && (
-                <ChangesSummary diff={advancedDiff} />
+                <ChangesSummary diff={advancedDiff} showSpecialBall={showSpecialBall} />
               )}
 
               {picks.length > 0 ? (
@@ -976,6 +986,7 @@ export default function PickGenerator() {
                                 );
                               });
                             })()}
+                            {showSpecialBall && (
                             <div className={`w-9 h-9 rounded flex items-center justify-center font-mono text-sm font-bold shadow-sm ml-1 relative ${
                               diff?.pbChanged
                                 ? "bg-green-500/20 text-green-300 border border-green-500/50 ring-1 ring-green-500/30"
@@ -984,6 +995,7 @@ export default function PickGenerator() {
                               <Zap className="w-3 h-3 absolute -top-1 -right-1 text-yellow-500" />
                               {pick.powerball.toString().padStart(2, '0')}
                             </div>
+                            )}
                           </div>
                           {diff && diff.linePercentChanged > 0 && (
                             <span className="text-[10px] font-mono text-green-400/70 ml-1">

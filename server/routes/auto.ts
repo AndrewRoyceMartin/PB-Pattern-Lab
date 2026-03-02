@@ -258,7 +258,7 @@ function applyPbMode(picks: GeneratedPick[], pbMode: PbMode, specialPool: number
   return picks;
 }
 
-function generateCNFPicks(draws: any[], seed: number, pbMode: PbMode = "default", specialPool: number = 20): GeneratedPick[] {
+function generateCNFPicks(draws: any[], seed: number, pbMode: PbMode = "default", specialPool: number = 20, gc: GameConfig = DEFAULT_GAME_CONFIG): GeneratedPick[] {
   const rng = mulberry32(seed);
   const picks: GeneratedPick[] = [];
   const usedSets = new Set<string>();
@@ -266,7 +266,7 @@ function generateCNFPicks(draws: any[], seed: number, pbMode: PbMode = "default"
 
   for (let attempt = 0; attempt < 200 && picks.length < 12; attempt++) {
     const noiseLevel = noiseSchedule[picks.length] ?? (0.3 + attempt * 0.05);
-    const { picks: mainNums, pb, formulaScore } = generateDiverseFormulaCard(draws, CNF_WEIGHTS, CNF_FEATURES, rng, noiseLevel);
+    const { picks: mainNums, pb, formulaScore } = generateDiverseFormulaCard(draws, CNF_WEIGHTS, CNF_FEATURES, rng, noiseLevel, gc);
     const key = mainNums.join(",") + "|" + pb;
     if (usedSets.has(key)) continue;
     usedSets.add(key);
@@ -329,7 +329,7 @@ export function registerAutoRoutes(app: Express): void {
       } else {
         const generatorConfig = STRATEGY_TO_GENERATOR[winner.strategy];
         if (generatorConfig && generatorConfig.mode === "composite_no_frequency") {
-          picks = generateCNFPicks(draws, seed, pbMode, gc.specialPool);
+          picks = generateCNFPicks(draws, seed, pbMode, gc.specialPool, gc);
         } else if (generatorConfig) {
           const handler = getGeneratorHandler(generatorConfig.mode as any);
           picks = handler({
@@ -406,14 +406,14 @@ export function registerAutoRoutes(app: Express): void {
       const gameId = (req.body?.gameId as string) || undefined;
       const gc = await resolveGameConfig(gameId);
       const draws = await storage.getModernDraws(gameId);
-      if (draws.length < 50) {
-        return res.status(400).json({ ok: false, message: `Only ${draws.length} modern draws available. Need at least 50 for generation.` });
+      if (draws.length < 10) {
+        return res.status(400).json({ ok: false, message: `Only ${draws.length} modern draws available. Need at least 10 for generation. Sync more draws from Data Ingest.` });
       }
 
       const pbMode = (req.body?.pbMode as PbMode) || "default";
       console.log(`[auto] Generating 12 lines using Composite No-Frequency (pbMode=${pbMode})...`);
       const seed = 42;
-      const picks = generateCNFPicks(draws, seed, pbMode, gc.specialPool);
+      const picks = generateCNFPicks(draws, seed, pbMode, gc.specialPool, gc);
 
       const latestRun = await storage.getLatestBenchmarkRun(gameId);
 
@@ -455,8 +455,8 @@ export function registerAutoRoutes(app: Express): void {
       const gameId = (req.body?.gameId as string) || undefined;
       const gc = await resolveGameConfig(gameId);
       const draws = await storage.getModernDraws(gameId);
-      if (draws.length < 50) {
-        return res.status(400).json({ ok: false, message: `Only ${draws.length} modern draws available. Need at least 50 for optimise-and-generate.` });
+      if (draws.length < 10) {
+        return res.status(400).json({ ok: false, message: `Only ${draws.length} modern draws available. Need at least 10 for optimise-and-generate. Sync more draws from Data Ingest.` });
       }
 
       const pbMode = (req.body?.pbMode as PbMode) || "default";
@@ -573,8 +573,8 @@ export function registerAutoRoutes(app: Express): void {
         return res.status(400).json({ ok: false, message: "Need at least 50 draws" });
       }
 
-      const picksA = generateCNFPicks(draws, seed, "default", gc.specialPool);
-      const picksB = generateCNFPicks(draws, seed, "default", gc.specialPool);
+      const picksA = generateCNFPicks(draws, seed, "default", gc.specialPool, gc);
+      const picksB = generateCNFPicks(draws, seed, "default", gc.specialPool, gc);
 
       const identical = picksA.length === picksB.length &&
         picksA.every((p, i) =>

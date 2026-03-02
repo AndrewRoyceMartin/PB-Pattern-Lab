@@ -24,8 +24,6 @@ export function registerSyncRoutes(app: Express) {
 
   app.post("/api/sync/thelott/powerball", async (req, res) => {
     try {
-      const maxPages = Math.min(req.body?.maxPages ?? 1, 50);
-      const stopIfSeen = req.body?.stopIfSeen ?? true;
       const gameId = "AU_POWERBALL";
 
       let totalSynced = 0;
@@ -33,24 +31,16 @@ export function registerSyncRoutes(app: Express) {
       let allDraws: InsertDraw[] = [];
       let dataSource: "api" | "scrape" = "api";
 
-      for (let page = 0; page < maxPages; page++) {
-        const result = await fetchPowerballDraws(10);
-        dataSource = result.source;
-        if (result.draws.length === 0) break;
-
-        let seenExisting = false;
-        for (const draw of result.draws) {
-          const existing = await storage.getDrawByNumber(draw.drawNumber, gameId);
-          if (existing) {
-            totalSkipped++;
-            seenExisting = true;
-          } else {
-            allDraws.push(draw);
-            totalSynced++;
-          }
+      const result = await fetchPowerballDraws(20);
+      dataSource = result.source;
+      for (const draw of result.draws) {
+        const existing = await storage.getDrawByNumber(draw.drawNumber, gameId);
+        if (existing) {
+          totalSkipped++;
+        } else {
+          allDraws.push(draw);
+          totalSynced++;
         }
-
-        if (stopIfSeen && seenExisting) break;
       }
 
       if (allDraws.length > 0) {
@@ -80,8 +70,6 @@ export function registerSyncRoutes(app: Express) {
 
   app.post("/api/sync/thelott/saturday-lotto", async (req, res) => {
     try {
-      const maxPages = Math.min(req.body?.maxPages ?? 1, 50);
-      const stopIfSeen = req.body?.stopIfSeen ?? true;
       const gameId = "AU_SATURDAY_LOTTO";
 
       let totalSynced = 0;
@@ -89,24 +77,16 @@ export function registerSyncRoutes(app: Express) {
       let allDraws: InsertDraw[] = [];
       let dataSource: "api" | "scrape" = "api";
 
-      for (let page = 0; page < maxPages; page++) {
-        const result = await fetchSaturdayLottoDraws(10);
-        dataSource = result.source;
-        if (result.draws.length === 0) break;
-
-        let seenExisting = false;
-        for (const draw of result.draws) {
-          const existing = await storage.getDrawByNumber(draw.drawNumber, gameId);
-          if (existing) {
-            totalSkipped++;
-            seenExisting = true;
-          } else {
-            allDraws.push(draw);
-            totalSynced++;
-          }
+      const result = await fetchSaturdayLottoDraws(20);
+      dataSource = result.source;
+      for (const draw of result.draws) {
+        const existing = await storage.getDrawByNumber(draw.drawNumber, gameId);
+        if (existing) {
+          totalSkipped++;
+        } else {
+          allDraws.push(draw);
+          totalSynced++;
         }
-
-        if (stopIfSeen && seenExisting) break;
       }
 
       if (allDraws.length > 0) {
