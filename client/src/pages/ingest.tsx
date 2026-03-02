@@ -178,6 +178,11 @@ export default function Ingest() {
           {theLottResult && (
             <div className={`text-xs font-mono p-3 rounded border ${theLottResult.synced > 0 ? "text-green-400 border-green-500/30 bg-green-500/5" : "text-muted-foreground border-border/50 bg-secondary/10"}`} data-testid="text-thelott-result">
               {theLottResult.message}
+              {theLottResult.source && (
+                <span className={`ml-2 px-1.5 py-0.5 rounded text-[10px] ${theLottResult.source === "api" ? "bg-blue-500/20 text-blue-400" : "bg-amber-500/20 text-amber-400"}`}>
+                  {theLottResult.source === "api" ? "API" : "SCRAPE"}
+                </span>
+              )}
             </div>
           )}
           {theLottResult?.draws?.length > 0 && (

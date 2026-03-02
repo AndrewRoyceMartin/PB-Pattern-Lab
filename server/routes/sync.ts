@@ -31,13 +31,15 @@ export function registerSyncRoutes(app: Express) {
       let totalSynced = 0;
       let totalSkipped = 0;
       let allDraws: InsertDraw[] = [];
+      let dataSource: "api" | "scrape" = "api";
 
       for (let page = 0; page < maxPages; page++) {
-        const draws = await fetchPowerballDraws(10);
-        if (draws.length === 0) break;
+        const result = await fetchPowerballDraws(10);
+        dataSource = result.source;
+        if (result.draws.length === 0) break;
 
         let seenExisting = false;
-        for (const draw of draws) {
+        for (const draw of result.draws) {
           const existing = await storage.getDrawByNumber(draw.drawNumber, gameId);
           if (existing) {
             totalSkipped++;
@@ -56,10 +58,12 @@ export function registerSyncRoutes(app: Express) {
       }
 
       res.json(apiResponse({
+        gameId,
         synced: totalSynced,
         skipped: totalSkipped,
+        source: dataSource,
         message: totalSynced > 0
-          ? `Synced ${totalSynced} new Powerball draws from TheLott`
+          ? `Synced ${totalSynced} new Powerball draws from TheLott (${dataSource})`
           : `Already up to date (${totalSkipped} draws already exist)`,
         draws: allDraws.map(d => ({
           drawNumber: d.drawNumber,
@@ -83,13 +87,15 @@ export function registerSyncRoutes(app: Express) {
       let totalSynced = 0;
       let totalSkipped = 0;
       let allDraws: InsertDraw[] = [];
+      let dataSource: "api" | "scrape" = "api";
 
       for (let page = 0; page < maxPages; page++) {
-        const draws = await fetchSaturdayLottoDraws(10);
-        if (draws.length === 0) break;
+        const result = await fetchSaturdayLottoDraws(10);
+        dataSource = result.source;
+        if (result.draws.length === 0) break;
 
         let seenExisting = false;
-        for (const draw of draws) {
+        for (const draw of result.draws) {
           const existing = await storage.getDrawByNumber(draw.drawNumber, gameId);
           if (existing) {
             totalSkipped++;
@@ -108,10 +114,12 @@ export function registerSyncRoutes(app: Express) {
       }
 
       res.json(apiResponse({
+        gameId,
         synced: totalSynced,
         skipped: totalSkipped,
+        source: dataSource,
         message: totalSynced > 0
-          ? `Synced ${totalSynced} new Saturday Lotto draws from TheLott`
+          ? `Synced ${totalSynced} new Saturday Lotto draws from TheLott (${dataSource})`
           : `Already up to date (${totalSkipped} draws already exist)`,
         draws: allDraws.map(d => ({
           drawNumber: d.drawNumber,

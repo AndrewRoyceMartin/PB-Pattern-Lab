@@ -17,9 +17,11 @@ Preferred communication style: Simple, everyday language.
 - **Game Selector**: Dropdown in sidebar layout; switching games filters all data and analysis.
 
 ### Data Sources
-- **TheLott API** (primary): POST `https://data.api.thelott.com/sales/vmax/web/data/lotto/latestresults` with `CompanyId` and `OptionalProductFilter`. Returns up to 10 draws per request.
-  - Sync endpoints: `POST /api/sync/thelott/powerball`, `POST /api/sync/thelott/saturday-lotto`
-  - Module: `server/sources/thelott/` (common.ts, powerball.ts, saturdayLotto.ts)
+- **TheLott API** (primary): POST `https://data.api.thelott.com/sales/vmax/web/data/lotto/latestresults` with `CompanyId` and `OptionalProductFilter`. Returns up to 10 draws per request. Multi-source resilience: tries GoldenCasket, NSWLotteries, SALotteries company IDs with automatic failover.
+  - **HTML scrape fallback**: If all API sources fail, falls back to scraping `thelott.com/{game}/results` via cheerio. Extracts `__NEXT_DATA__` JSON first, then LD+JSON, then HTML parsing as last resort.
+  - **Rate limiting**: 1 request/sec to TheLott (both API and scrape). HTML responses cached for 60 seconds.
+  - Sync endpoints: `POST /api/sync/thelott/powerball`, `POST /api/sync/thelott/saturday-lotto`. Response includes `source: "api" | "scrape"`.
+  - Module: `server/sources/thelott/` (common.ts, powerball.ts, saturdayLotto.ts, types.ts)
 - **Lottolyzer RSS** (Powerball-only fallback): `POST /api/rss-sync`, `POST /api/rss-sync-all` for bulk historical import.
 - **CSV Upload**: Game-aware, passes `gameId` with upload.
 
