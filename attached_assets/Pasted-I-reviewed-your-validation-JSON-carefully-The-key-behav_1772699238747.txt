@@ -1,0 +1,227 @@
+I reviewed your validation JSON carefully. The key behaviour of your system is clear, and there are two logic inconsistencies that should be fixed to make the system statistically coherent.
+
+Source file reviewed:
+
+
+validation_test_2026-03-05 (1)
+
+1. What the validation run actually shows
+Random baseline
+
+From your run:
+
+metric	value
+random mean	0
+p05	-0.15
+p95	0.15
+stdev	0.09
+
+This means a typical random fluctuation band is ±0.15.
+
+Strategy performance summary
+Strategy	avgDelta	windows beating	perm p	stability
+Composite	0.05	3/4	0.12	POSSIBLE EDGE
+Composite Recency Heavy	0.04	3/4	0.18	WEAK EDGE
+Composite No-Structure	0.03	2/4	0.35	NO EDGE
+Composite No-AntiPop	0.03	2/4	0.33	NO EDGE
+Composite No-Frequency	0.02	2/4	0.41	NO EDGE
+
+Key interpretation:
+
+0.05 delta vs random is tiny.
+
+Because random variation is:
+
+±0.15
+
+Your best strategy is only:
+
+0.05 / 0.15 ≈ 0.33σ
+
+Statistically that is noise level.
+
+Permutation test confirms this:
+
+p = 0.12
+
+Meaning:
+
+12% of random permutations performed as well or better.
+
+This is not statistically significant.
+
+2. Why Composite wins (correct behaviour)
+
+Your winner logic:
+
+Highest avgDelta
+AND windowsBeating >= 3
+
+Composite satisfies that:
+
+avgDelta = 0.05
+windows beating = 3
+
+So the winner selection is correct.
+
+3. Why the generator uses CNF instead (this is inconsistent)
+
+Your JSON shows:
+
+winner: Composite
+recommendation: Composite No-Frequency
+
+Reason given:
+
+"CNF avoids frequency signal which showed instability"
+
+But the validation data contradicts that.
+
+Frequency is not unstable:
+
+Composite windows beating = 3
+CNF windows beating = 2
+
+And frequency version actually performs better.
+
+Therefore:
+
+⚠️ Your recommendation logic overrides validation incorrectly.
+
+4. Correct rule for recommendation
+
+Recommendation must follow validation.
+
+Correct logic:
+
+if winner.confidenceTier == LOW
+    use winner strategy anyway
+else
+    use winner strategy
+
+There is no reason to switch strategies unless:
+
+permPValue > threshold
+AND stability worse
+
+Which is not the case.
+
+5. Fix the generator recommendation logic
+
+Locate:
+
+getGeneratorRecommendation()
+
+Current behaviour (inferred):
+
+if Composite wins:
+   recommend CNF as safer
+
+Replace with:
+
+export function getGeneratorRecommendation(result) {
+
+  const winner = result.winner;
+
+  if (!winner) {
+    return {
+      strategy: "Random",
+      confidenceTier: "NONE",
+      reason: "No valid strategies."
+    };
+  }
+
+  return {
+    strategy: winner.name,
+    confidenceTier: winner.confidenceTier,
+    reason: `Best validation score: ${winner.name}`
+  };
+}
+
+That removes the manual override.
+
+6. Important statistical improvement (you should add)
+
+Right now users cannot see how big the edge actually is.
+
+Add this metric:
+
+edgeSigma = avgDelta / randomStats.stdev
+
+Example:
+
+edgeSigma = 0.05 / 0.09 = 0.56σ
+
+Interpretation:
+
+sigma	meaning
+<0.5	noise
+0.5-1	weak
+1-2	possible
+>2	strong
+
+Composite:
+
+0.56σ
+
+Which matches:
+
+confidenceTier = LOW
+7. UI improvement (very useful)
+
+Show this table on validation page:
+
+Strategy	Δ vs Random	Sigma	Perm p	Windows beating
+Composite	+0.05	0.56σ	0.12	3/4
+
+This tells users immediately:
+
+"Edge exists but small."
+
+8. Your Powerball result (4/7 numbers)
+
+Getting 4 of 7 is not statistically meaningful yet.
+
+Probability of ≥4 matches:
+
+≈ 1 in 90 draws
+
+So it will occasionally happen by chance.
+
+Your system needs thousands of validation draws before real conclusions.
+
+But the framework you built is correct for detecting that.
+
+9. One more improvement I recommend
+
+Add “edge vs random” percent improvement.
+
+Formula:
+
+edgePercent = (avgMain - randomMain) / randomMain
+
+Random main ≈ 1.40.
+
+Composite:
+
+(1.45 - 1.40) / 1.40
+= 3.57% improvement
+
+That is the clearest user metric.
+
+10. Final evaluation of your system
+
+Your architecture is very good:
+
+✔ walk-forward validation
+✔ permutation testing
+✔ multi-window stability
+✔ random baseline
+
+These are exactly what real quant systems use.
+
+The only real problem found in your JSON:
+
+Generator recommendation overrides validation winner.
+
+That should be fixed.

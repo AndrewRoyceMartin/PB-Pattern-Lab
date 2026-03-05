@@ -415,44 +415,42 @@ export function getGeneratorRecommendation(gameId?: string): GeneratorRecommenda
     regimeCaveat: regimeAware ? regimeCaveat : undefined,
   });
 
-  if (possibleEdge.length > 0) {
-    const top = possibleEdge.sort((a, b) => b.avgDelta - a.avgDelta)[0];
-    const mode = STRATEGY_TO_MODE[top.strategy] || "balanced";
+  const randomStdDev = benchmark.randomEnsemble?.stdDev ?? 0.09;
+  const edgeSigma = randomStdDev > 0 ? Math.abs(best.avgDelta) / randomStdDev : 0;
+
+  const hasEdge = best.avgDelta > 0 && (best.stabilityClass === "possible_edge" || best.stabilityClass === "weak_edge");
+
+  if (hasEdge) {
+    const mode = STRATEGY_TO_MODE[best.strategy] || "balanced";
     const modeLabel = MODE_TO_LABEL[mode] || "Balanced";
-    const isMostDrawn = top.strategy.startsWith("Most Drawn");
+    const isMostDrawn = best.strategy.startsWith("Most Drawn");
+
+    let confidence: RecommendationConfidence;
+    if (edgeSigma >= 2) confidence = "high";
+    else if (edgeSigma >= 1 || (best.stabilityClass === "possible_edge" && best.windowsBeating >= 3)) confidence = "medium";
+    else confidence = "low";
+
+    const sigmaLabel = edgeSigma < 0.5 ? "noise-level" : edgeSigma < 1 ? "weak" : edgeSigma < 2 ? "possible" : "strong";
+
     return buildResult({
       recommendedMode: mode,
       recommendedStrategy: modeLabel,
-      confidence: possibleEdge.length >= 2 ? "high" : "medium",
-      reasonSummary: `"${top.strategy}" consistently outperformed random across ${top.windowsBeating} of ${top.windowsTested} test windows (avg delta +${top.avgDelta}). ${isMostDrawn ? "Using this frequency benchmark directly." : `Using ${modeLabel} mode to blend this signal with anti-popularity protection.`}`,
+      confidence,
+      reasonSummary: `"${best.strategy}" is the validation winner with avg delta +${best.avgDelta} (${edgeSigma.toFixed(2)}σ, ${sigmaLabel}) across ${best.windowsBeating}/${best.windowsTested} windows. ${isMostDrawn ? "Using this frequency benchmark directly." : `Using ${modeLabel} mode to blend this signal with anti-popularity protection.`}`,
       evidence,
       strategyBadges: badges,
       hasBenchmark: true,
     });
   }
 
-  if (weakEdge.length > 0) {
-    const top = weakEdge.sort((a, b) => b.avgDelta - a.avgDelta)[0];
-    const mode = STRATEGY_TO_MODE[top.strategy] || "balanced";
+  if (best.avgDelta > 0) {
+    const mode = STRATEGY_TO_MODE[best.strategy] || "balanced";
     const modeLabel = MODE_TO_LABEL[mode] || "Balanced";
     return buildResult({
       recommendedMode: mode,
       recommendedStrategy: modeLabel,
       confidence: "low",
-      reasonSummary: `"${top.strategy}" showed a small advantage in ${top.windowsBeating} of ${top.windowsTested} windows (avg delta +${top.avgDelta}), but it's not stable across all windows. Using ${modeLabel} mode to mix this weak signal with anti-popularity scoring. Monitor over future benchmarks.`,
-      evidence,
-      strategyBadges: badges,
-      hasBenchmark: true,
-    });
-  }
-
-  const structureMatched = stabilities.find(s => s.strategy === "Structure-Matched Random");
-  if (structureMatched && structureMatched.avgDelta > 0.05) {
-    return buildResult({
-      recommendedMode: "structure_matched_random",
-      recommendedStrategy: "Structure-Matched Random",
-      confidence: "low",
-      reasonSummary: `No predictive edge found, but "Structure-Matched Random" showed a small structural advantage (avg delta +${structureMatched.avgDelta}). Using structure-matched mode for better baseline coverage. Anti-popularity protection is still your main practical advantage.`,
+      reasonSummary: `"${best.strategy}" had the highest avg delta +${best.avgDelta} (${edgeSigma.toFixed(2)}σ) but showed no stable edge. Using ${modeLabel} mode — anti-popularity protection is your main practical advantage. Monitor over future benchmarks.`,
       evidence,
       strategyBadges: badges,
       hasBenchmark: true,
@@ -462,8 +460,8 @@ export function getGeneratorRecommendation(gameId?: string): GeneratorRecommenda
   return buildResult({
     recommendedMode: "strategy_portfolio",
     recommendedStrategy: "Strategy Portfolio",
-    confidence: "medium",
-    reasonSummary: "No single strategy beat random consistently. Recommending Strategy Portfolio mode — it builds a mixed 10-game pack from multiple strategies for maximum coverage and diversity. This combines the practical anti-popularity advantage with diverse strategic approaches.",
+    confidence: "low",
+    reasonSummary: "No strategy beat random consistently. Recommending Strategy Portfolio mode — it builds a mixed 10-game pack from multiple strategies for maximum coverage and diversity. Anti-popularity protection is your main practical advantage.",
     evidence,
     strategyBadges: badges,
     hasBenchmark: true,

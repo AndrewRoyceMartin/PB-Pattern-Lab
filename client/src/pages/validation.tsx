@@ -410,11 +410,15 @@ export default function Validation() {
   const exportSummaryCSV = () => {
     if (!benchmark) return;
     const meta = buildMetaRows();
-    const headers = ["Strategy", "Stability", "Significance", "Windows Tested", "Windows Beating", "Windows Losing", "Avg Delta", "Significance p-value"];
+    const randomStdDev = benchmark.randomEnsemble?.stdDev ?? 0.09;
+    const randomMain = 1.40 + (benchmark.randomEnsemble?.mean ?? 0);
+    const headers = ["Strategy", "Stability", "Significance", "Windows Tested", "Windows Beating", "Windows Losing", "Avg Delta", "Edge Sigma", "Edge %", "Significance p-value"];
     const rows = benchmark.stabilityByStrategy.map(s => {
       const perm = benchmark.permutationTests?.find(p => p.strategy === s.strategy);
       const sigLabel = perm ? (perm.empiricalPValue <= 0.05 ? "Supported" : perm.empiricalPValue <= 0.20 ? "Suggestive" : "Unsupported") : "";
-      return [s.strategy, s.stabilityClass, sigLabel, s.windowsTested, s.windowsBeating, s.windowsLosing, s.avgDelta, perm?.empiricalPValue ?? ""].join(",");
+      const edgeSigma = randomStdDev > 0 ? (s.avgDelta / randomStdDev).toFixed(2) : "0.00";
+      const edgePct = randomMain > 0 ? (((randomMain + s.avgDelta - randomMain) / randomMain) * 100).toFixed(1) : "0.0";
+      return [s.strategy, s.stabilityClass, sigLabel, s.windowsTested, s.windowsBeating, s.windowsLosing, s.avgDelta, edgeSigma, edgePct, perm?.empiricalPValue ?? ""].join(",");
     });
     downloadCSV([...meta, "", headers.join(","), ...rows, "", `Verdict: ${benchmark.overallVerdict}`].join("\n"), "summary");
   };
@@ -540,9 +544,9 @@ export default function Validation() {
         confidenceTier: "LOW",
       },
       recommendation: {
-        recommendedStrategyName: "Composite No-Frequency",
+        recommendedStrategyName: "Composite",
         lane: "CNF",
-        reason: "CNF avoids frequency signal which showed instability across windows. Composite scored higher overall but CNF is more conservative and recommended for generation.",
+        reason: "Composite is the validation winner with highest avgDelta (+0.05, 0.56σ) and 3/4 windows beating random. Recommendation follows validation result directly.",
         confidenceTier: "LOW",
       },
     };
@@ -938,10 +942,10 @@ export default function Validation() {
                         {hasPermutation && (
                           <th className="p-2.5 text-muted-foreground font-medium text-right">Significance</th>
                         )}
-                        <th className="p-2.5 text-muted-foreground font-medium text-center">Tested</th>
                         <th className="p-2.5 text-muted-foreground font-medium text-center">Beating</th>
-                        <th className="p-2.5 text-muted-foreground font-medium text-center">Losing</th>
                         <th className="p-2.5 text-muted-foreground font-medium text-right">Avg Delta</th>
+                        <th className="p-2.5 text-muted-foreground font-medium text-right">Sigma</th>
+                        <th className="p-2.5 text-muted-foreground font-medium text-right">Edge %</th>
                         {hasPermutation && (
                           <th className="p-2.5 text-muted-foreground font-medium text-right">p-value</th>
                         )}
@@ -952,6 +956,16 @@ export default function Validation() {
                       {sortedStability.map((s, i) => {
                         const perm = benchmark.permutationTests?.find(p => p.strategy === s.strategy);
                         const isQueued = drillDownQueue.some(d => d.strategy === s.strategy);
+                        const randomStdDev = benchmark.randomEnsemble?.stdDev ?? 0.09;
+                        const edgeSigma = randomStdDev > 0 ? s.avgDelta / randomStdDev : 0;
+                        const randomMain = benchmark.randomEnsemble?.mean !== undefined
+                          ? 1.40 + benchmark.randomEnsemble.mean
+                          : 1.40;
+                        const strategyMain = randomMain + s.avgDelta;
+                        const edgePct = randomMain > 0 ? ((strategyMain - randomMain) / randomMain) * 100 : 0;
+                        const sigmaColor = Math.abs(edgeSigma) >= 2 ? "text-green-500" :
+                          Math.abs(edgeSigma) >= 1 ? "text-yellow-500" :
+                          Math.abs(edgeSigma) >= 0.5 ? "text-orange-400" : "text-muted-foreground";
                         return (
                           <tr key={i} className={`hover:bg-secondary/20 transition-colors ${getStrategyBg(s.strategy)}`}>
                             <td className={`p-2.5 font-bold ${getStrategyColor(s.strategy)}`}>
@@ -963,11 +977,18 @@ export default function Validation() {
                                 <SignificanceBadge strategyName={s.strategy} permutationTests={benchmark.permutationTests} />
                               </td>
                             )}
-                            <td className="p-2.5 text-center">{s.windowsTested}</td>
-                            <td className="p-2.5 text-center text-green-500 font-bold">{s.windowsBeating}</td>
-                            <td className="p-2.5 text-center text-red-500 font-bold">{s.windowsLosing}</td>
+                            <td className="p-2.5 text-center">
+                              <span className="text-green-500 font-bold">{s.windowsBeating}</span>
+                              <span className="text-muted-foreground/50">/{s.windowsTested}</span>
+                            </td>
                             <td className={`p-2.5 text-right font-bold ${s.avgDelta > 0 ? "text-green-500" : s.avgDelta < 0 ? "text-red-500" : ""}`}>
                               {s.avgDelta >= 0 ? "+" : ""}{s.avgDelta}
+                            </td>
+                            <td className={`p-2.5 text-right font-bold ${sigmaColor}`}>
+                              {edgeSigma >= 0 ? "+" : ""}{edgeSigma.toFixed(2)}σ
+                            </td>
+                            <td className={`p-2.5 text-right font-bold ${edgePct > 0 ? "text-green-500" : edgePct < 0 ? "text-red-500" : "text-muted-foreground"}`}>
+                              {edgePct >= 0 ? "+" : ""}{edgePct.toFixed(1)}%
                             </td>
                             {hasPermutation && (
                               <td className="p-2.5 text-right">
