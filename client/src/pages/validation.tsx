@@ -233,7 +233,7 @@ function getPresetPermutationTargets(preset: BenchmarkPreset): string[] | undefi
 export default function Validation() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const { activeGameId } = useGame();
+  const { activeGameId, activeGame } = useGame();
   const { data: stats } = useQuery({ queryKey: ["/api/stats", activeGameId], queryFn: () => fetchApi(`/api/stats?gameId=${activeGameId}`) });
   const { data: validation } = useQuery<ValidationSummary>({ queryKey: ["/api/analysis/validation", activeGameId], queryFn: () => fetchApi(`/api/analysis/validation?gameId=${activeGameId}`), enabled: !!stats?.modernDraws });
   const { data: benchmarkHistory } = useQuery<BenchmarkHistoryItem[]>({
@@ -483,23 +483,68 @@ export default function Validation() {
     URL.revokeObjectURL(url);
   };
 
-  const handleLoadTestData = () => {
-    const testData = {
+  const handleDedicatedValidationTest = () => {
+    const now = new Date().toISOString();
+    const windows = [20, 40, 60, 100];
+
+    const testPayload = {
+      runConfigUsed: {
+        runId: "test-validation-001",
+        gameId: activeGameId,
+        gameName: activeGame?.displayName || "Powerball",
+        benchmarkMode: "rolling_walk_forward" as const,
+        windowSizes: windows,
+        seed: 42,
+        randomBaselineRuns: 500,
+        runPermutation: true,
+        permutationRuns: 1000,
+        regimeSplits: true,
+        presetName: "Significance Check",
+        createdAt: now,
+        minTrainDraws: 100,
+        totalDrawsAvailable: 400,
+      },
+      randomStats: { mean: 0.00, p05: -0.15, p95: 0.15, stdev: 0.09 },
       strategies: [
-        { name: "Composite No-Frequency", avgDelta: 0.02, windowsBeating: 2, windowsTested: 4, stabilityClass: "NO EDGE" },
-        { name: "Composite Recency-Heavy", avgDelta: 0.04, windowsBeating: 3, windowsTested: 4, stabilityClass: "WEAK EDGE" },
-        { name: "Recency Smoothed", avgDelta: 0.01, windowsBeating: 1, windowsTested: 4, stabilityClass: "NO EDGE" },
-        { name: "Composite", avgDelta: 0.05, windowsBeating: 3, windowsTested: 4, stabilityClass: "POSSIBLE EDGE" },
-        { name: "Recency Decay Weighted", avgDelta: -0.01, windowsBeating: 1, windowsTested: 4, stabilityClass: "UNDERPERFORMING" },
-        { name: "Most Drawn (Last 50)", avgDelta: 0.03, windowsBeating: 2, windowsTested: 4, stabilityClass: "NO EDGE" },
-        { name: "Most Drawn (Last 20)", avgDelta: -0.02, windowsBeating: 0, windowsTested: 4, stabilityClass: "UNDERPERFORMING" },
-        { name: "Smoothed Most Drawn (L50)", avgDelta: 0.02, windowsBeating: 2, windowsTested: 4, stabilityClass: "NO EDGE" },
-        { name: "Structure-Matched Random", avgDelta: 0.00, windowsBeating: 2, windowsTested: 4, stabilityClass: "NO EDGE" },
-        { name: "Diversity Optimized", avgDelta: 0.01, windowsBeating: 2, windowsTested: 4, stabilityClass: "NO EDGE" },
-        { name: "Anti-Popular Only", avgDelta: -0.03, windowsBeating: 0, windowsTested: 4, stabilityClass: "UNDERPERFORMING" },
-        { name: "Random", avgDelta: 0.00, windowsBeating: 0, windowsTested: 4, stabilityClass: "NO EDGE" },
+        { name: "Composite", avgMain: 1.45, avgDelta: 0.05, windowsTested: 4, windowsBeating: 3, stabilityClass: "POSSIBLE EDGE", pbHitPct: 5.8, bestMain: 5, permPValue: 0.12,
+          windowResults: [{ window: 20, avgDelta: 0.10, beating: true }, { window: 40, avgDelta: 0.06, beating: true }, { window: 60, avgDelta: 0.03, beating: true }, { window: 100, avgDelta: -0.01, beating: false }] },
+        { name: "Composite No-Frequency", avgMain: 1.42, avgDelta: 0.02, windowsTested: 4, windowsBeating: 2, stabilityClass: "NO EDGE", pbHitPct: 5.2, bestMain: 4, permPValue: 0.41,
+          windowResults: [{ window: 20, avgDelta: 0.08, beating: true }, { window: 40, avgDelta: -0.01, beating: false }, { window: 60, avgDelta: 0.04, beating: true }, { window: 100, avgDelta: -0.03, beating: false }] },
+        { name: "Composite Recency-Heavy", avgMain: 1.44, avgDelta: 0.04, windowsTested: 4, windowsBeating: 3, stabilityClass: "WEAK EDGE", pbHitPct: 5.5, bestMain: 5, permPValue: 0.18,
+          windowResults: [{ window: 20, avgDelta: 0.09, beating: true }, { window: 40, avgDelta: 0.05, beating: true }, { window: 60, avgDelta: 0.01, beating: true }, { window: 100, avgDelta: -0.02, beating: false }] },
+        { name: "Composite No-Recency", avgMain: 1.42, avgDelta: 0.02, windowsTested: 4, windowsBeating: 2, stabilityClass: "NO EDGE", pbHitPct: 4.8, bestMain: 4, permPValue: 0.38,
+          windowResults: [{ window: 20, avgDelta: 0.04, beating: true }, { window: 40, avgDelta: 0.03, beating: true }, { window: 60, avgDelta: -0.01, beating: false }, { window: 100, avgDelta: -0.02, beating: false }] },
+        { name: "Composite No-Structure", avgMain: 1.43, avgDelta: 0.03, windowsTested: 4, windowsBeating: 2, stabilityClass: "NO EDGE", pbHitPct: 5.0, bestMain: 4, permPValue: 0.35,
+          windowResults: [{ window: 20, avgDelta: 0.07, beating: true }, { window: 40, avgDelta: 0.02, beating: true }, { window: 60, avgDelta: -0.01, beating: false }, { window: 100, avgDelta: -0.02, beating: false }] },
+        { name: "Composite No-AntiPop", avgMain: 1.43, avgDelta: 0.03, windowsTested: 4, windowsBeating: 2, stabilityClass: "NO EDGE", pbHitPct: 5.1, bestMain: 4, permPValue: 0.33,
+          windowResults: [{ window: 20, avgDelta: 0.06, beating: true }, { window: 40, avgDelta: 0.04, beating: true }, { window: 60, avgDelta: -0.02, beating: false }, { window: 100, avgDelta: -0.01, beating: false }] },
+        { name: "Composite Structure-Heavy", avgMain: 1.41, avgDelta: 0.01, windowsTested: 4, windowsBeating: 2, stabilityClass: "NO EDGE", pbHitPct: 4.9, bestMain: 4, permPValue: 0.45,
+          windowResults: [{ window: 20, avgDelta: 0.03, beating: true }, { window: 40, avgDelta: 0.02, beating: true }, { window: 60, avgDelta: -0.01, beating: false }, { window: 100, avgDelta: -0.03, beating: false }] },
+        { name: "Recency Smoothed", avgMain: 1.41, avgDelta: 0.01, windowsTested: 4, windowsBeating: 1, stabilityClass: "NO EDGE", pbHitPct: 5.0, bestMain: 4, permPValue: 0.52,
+          windowResults: [{ window: 20, avgDelta: 0.05, beating: true }, { window: 40, avgDelta: -0.01, beating: false }, { window: 60, avgDelta: 0.00, beating: false }, { window: 100, avgDelta: -0.02, beating: false }] },
+        { name: "Recency Decay Weighted", avgMain: 1.39, avgDelta: -0.01, windowsTested: 4, windowsBeating: 1, stabilityClass: "UNDERPERFORMING", pbHitPct: 4.7, bestMain: 3, permPValue: 0.61,
+          windowResults: [{ window: 20, avgDelta: 0.03, beating: true }, { window: 40, avgDelta: -0.02, beating: false }, { window: 60, avgDelta: -0.03, beating: false }, { window: 100, avgDelta: -0.04, beating: false }] },
+        { name: "Most Drawn (Last 50)", avgMain: 1.43, avgDelta: 0.03, windowsTested: 4, windowsBeating: 2, stabilityClass: "NO EDGE", pbHitPct: 5.0, bestMain: 4, permPValue: 0.36,
+          windowResults: [{ window: 20, avgDelta: 0.06, beating: true }, { window: 40, avgDelta: 0.02, beating: true }, { window: 60, avgDelta: -0.01, beating: false }, { window: 100, avgDelta: -0.01, beating: false }] },
+        { name: "Most Drawn (Last 20)", avgMain: 1.38, avgDelta: -0.02, windowsTested: 4, windowsBeating: 0, stabilityClass: "UNDERPERFORMING", pbHitPct: 4.5, bestMain: 3, permPValue: 0.72,
+          windowResults: [{ window: 20, avgDelta: -0.01, beating: false }, { window: 40, avgDelta: -0.02, beating: false }, { window: 60, avgDelta: -0.03, beating: false }, { window: 100, avgDelta: -0.04, beating: false }] },
+        { name: "Anti-Popular Only", avgMain: 1.37, avgDelta: -0.03, windowsTested: 4, windowsBeating: 0, stabilityClass: "UNDERPERFORMING", pbHitPct: 4.3, bestMain: 3, permPValue: 0.78,
+          windowResults: [{ window: 20, avgDelta: -0.02, beating: false }, { window: 40, avgDelta: -0.03, beating: false }, { window: 60, avgDelta: -0.04, beating: false }, { window: 100, avgDelta: -0.05, beating: false }] },
+        { name: "Random", avgMain: 1.40, avgDelta: 0.00, windowsTested: 4, windowsBeating: 0, stabilityClass: "NO EDGE", pbHitPct: 5.0, bestMain: 4, permPValue: null,
+          windowResults: [{ window: 20, avgDelta: 0.00, beating: false }, { window: 40, avgDelta: 0.00, beating: false }, { window: 60, avgDelta: 0.00, beating: false }, { window: 100, avgDelta: 0.00, beating: false }] },
       ],
-      randomStats: { mean: 0.00, p05: -0.15, p95: 0.15 },
+      winner: {
+        name: "Composite",
+        reason: "Highest avgDelta (+0.05), beating random in 3/4 windows with POSSIBLE EDGE stability.",
+        validated: false,
+        confidenceTier: "LOW",
+      },
+      recommendation: {
+        recommendedStrategyName: "Composite No-Frequency",
+        lane: "CNF",
+        reason: "CNF avoids frequency signal which showed instability across windows. Composite scored higher overall but CNF is more conservative and recommended for generation.",
+        confidenceTier: "LOW",
+      },
     };
 
     const mapStabilityClass = (raw: string): "possible_edge" | "weak_edge" | "no_edge" | "underperforming" => {
@@ -510,9 +555,7 @@ export default function Validation() {
       return "no_edge";
     };
 
-    const windows = [20, 40, 60, 100];
-
-    const stabilityByStrategy = testData.strategies.map(s => ({
+    const stabilityByStrategy = testPayload.strategies.map(s => ({
       strategy: s.name,
       windowsTested: s.windowsTested,
       windowsBeating: s.windowsBeating,
@@ -521,59 +564,85 @@ export default function Validation() {
       stabilityClass: mapStabilityClass(s.stabilityClass),
     }));
 
-    const byWindowByStrategy = testData.strategies.flatMap(s =>
-      windows.map(w => ({
+    const byWindowByStrategy = testPayload.strategies.flatMap(s =>
+      s.windowResults.map(wr => ({
         strategy: s.name,
-        windowSize: w,
-        testDraws: w,
-        trainDraws: 200 - w,
-        evaluatedDraws: w,
+        windowSize: wr.window,
+        testDraws: wr.window,
+        trainDraws: 400 - wr.window,
+        evaluatedDraws: wr.window,
         skippedDraws: 0,
-        avgMainMatches: 1.40 + s.avgDelta,
-        bestMainMatches: 4,
-        powerballHitRate: 5.0,
-        powerballHits: Math.round(w * 0.05),
-        deltaVsRandom: s.avgDelta,
-        deltaVsRandomMean: s.avgDelta,
-        beatsRandom: s.avgDelta > 0,
-        withinRandomBand: s.avgDelta >= testData.randomStats.p05 && s.avgDelta <= testData.randomStats.p95,
+        avgMainMatches: s.avgMain,
+        bestMainMatches: s.bestMain,
+        powerballHitRate: s.pbHitPct,
+        powerballHits: Math.round(wr.window * (s.pbHitPct / 100)),
+        deltaVsRandom: wr.avgDelta,
+        deltaVsRandomMean: wr.avgDelta,
+        beatsRandom: wr.beating,
+        withinRandomBand: wr.avgDelta >= testPayload.randomStats.p05 && wr.avgDelta <= testPayload.randomStats.p95,
       }))
     );
+
+    const permutationTests = testPayload.strategies
+      .filter(s => s.permPValue !== null)
+      .map(s => ({
+        strategy: s.name,
+        metric: "avgMainMatches",
+        observedDelta: s.avgDelta,
+        nullMean: 0.00,
+        nullStd: testPayload.randomStats.stdev,
+        percentile: Math.round((1 - (s.permPValue ?? 0.5)) * 100),
+        empiricalPValue: s.permPValue!,
+        cautionText: "Permutation testing shuffles draw outcomes. A low p-value is suggestive but not proof of causality.",
+        shuffleMethod: "full_draw_shuffle",
+        scope: "all_windows",
+        runs: testPayload.runConfigUsed.permutationRuns,
+      }));
 
     const testBenchmark: BenchmarkSummary = {
       byWindowByStrategy,
       stabilityByStrategy,
       windowSizesTested: windows,
-      totalDrawsAvailable: 200,
-      overallVerdict: "TEST DATA — This is sample benchmark data for preview. Run a real benchmark to get actual results.",
-      benchmarkMode: "rolling_walk_forward",
-      seed: 42,
+      totalDrawsAvailable: testPayload.runConfigUsed.totalDrawsAvailable,
+      overallVerdict: `DEDICATED VALIDATION TEST — Winner: ${testPayload.winner.name} (${testPayload.winner.confidenceTier} confidence). Recommendation: ${testPayload.recommendation.recommendedStrategyName} via ${testPayload.recommendation.lane} lane. ${testPayload.winner.reason}`,
+      benchmarkMode: testPayload.runConfigUsed.benchmarkMode,
+      seed: testPayload.runConfigUsed.seed,
       randomEnsemble: {
-        runs: 200,
-        seed: 42,
-        mean: testData.randomStats.mean,
-        p05: testData.randomStats.p05,
-        p95: testData.randomStats.p95,
-        stdDev: 0.09,
+        runs: testPayload.runConfigUsed.randomBaselineRuns,
+        seed: testPayload.runConfigUsed.seed,
+        mean: testPayload.randomStats.mean,
+        p05: testPayload.randomStats.p05,
+        p95: testPayload.randomStats.p95,
+        stdDev: testPayload.randomStats.stdev,
       },
-      permutationTests: [],
-      presetName: "Test Data",
+      permutationTests,
+      presetName: "Dedicated Validation Test",
     };
 
     setBenchmark(testBenchmark);
     setRunConfigUsed({
-      benchmarkMode: "rolling_walk_forward",
-      windowSizes: windows,
-      minTrainDraws: 100,
-      seed: 42,
-      randomBaselineRuns: 200,
-      runPermutation: false,
-      permutationRuns: 0,
-      totalDrawsAvailable: 200,
-      presetName: "Test Data",
+      benchmarkMode: testPayload.runConfigUsed.benchmarkMode,
+      windowSizes: testPayload.runConfigUsed.windowSizes,
+      minTrainDraws: testPayload.runConfigUsed.minTrainDraws,
+      seed: testPayload.runConfigUsed.seed,
+      randomBaselineRuns: testPayload.runConfigUsed.randomBaselineRuns,
+      runPermutation: testPayload.runConfigUsed.runPermutation,
+      permutationRuns: testPayload.runConfigUsed.permutationRuns,
+      totalDrawsAvailable: testPayload.runConfigUsed.totalDrawsAvailable,
+      presetName: testPayload.runConfigUsed.presetName,
+      regimeSplits: testPayload.runConfigUsed.regimeSplits,
     });
-    setRunTimestamp(new Date().toISOString());
-    toast({ title: "Test data loaded", description: `Loaded ${testData.strategies.length} test strategies with sample benchmark results.` });
+    setRunTimestamp(now);
+
+    const blob = new Blob([JSON.stringify(testPayload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `validation_test_${now.slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+
+    toast({ title: "Validation test loaded & exported", description: `${testPayload.strategies.length} strategies with permutation data, winner, and recommendation. JSON downloaded.` });
   };
 
   const edgeStrategies = benchmark?.stabilityByStrategy.filter(s => s.stabilityClass === "possible_edge" || s.stabilityClass === "weak_edge") ?? [];
@@ -615,9 +684,9 @@ export default function Validation() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={handleLoadTestData} disabled={isRunning} className="font-mono" data-testid="button-load-test-data">
+            <Button variant="outline" onClick={handleDedicatedValidationTest} disabled={isRunning} className="font-mono" data-testid="button-dedicated-validation-test">
               <Beaker className="w-4 h-4 mr-2" />
-              LOAD TEST DATA
+              DEDICATED VALIDATION TEST
             </Button>
             <Button onClick={handleRunBenchmark} disabled={isRunning || !hasData} className="bg-primary hover:bg-primary/90 font-mono" data-testid="button-run-benchmark">
               {isRunning ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Play className="w-4 h-4 mr-2" />}
