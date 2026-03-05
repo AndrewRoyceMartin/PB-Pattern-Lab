@@ -1,0 +1,161 @@
+1) Run metadata
+
+runId (or benchmarkRunId)
+
+gameId
+
+gameName (optional)
+
+createdAt (timestamp)
+
+benchmarkMode (fixed_holdout / rolling_walk_forward)
+
+windowSizes (e.g. [20,40,60,100])
+
+holdoutSize / trainSize (if used)
+
+seed
+
+randomBaselineRuns
+
+runPermutation (true/false)
+
+permutationRuns
+
+regimeSplits (true/false)
+
+presetName (if any)
+
+2) Random baseline summary (for “edge vs random”)
+
+randomStats:
+
+mean
+
+median (optional)
+
+p05
+
+p95
+
+stdev (optional)
+
+3) Strategy results (for winner selection)
+
+For each strategy:
+
+name
+
+avgMain (or whatever your “Avg Main” metric is)
+
+avgDelta (vs random)
+
+windowsTested
+
+windowsBeating
+
+stabilityClass
+
+pbHitPct (if you’re using it anywhere)
+
+bestMain / bestHit (optional)
+
+4) The app’s current “chosen winner” (if computed)
+
+winner object:
+
+name
+
+reason (if you store it)
+
+confidenceTier / validated (if present)
+
+5) Recommendation payload used by pick generator (important)
+
+If your generator uses a recommendation object or cached latest benchmark:
+
+recommendation:
+
+recommendedStrategyName
+
+lane (CNF / Optimised / etc)
+
+reason
+
+confidenceTier
+
+If you don’t have this field yet, add it — it’s the easiest way to catch contradictions.
+
+Nice-to-have (only if it’s easy)
+A) Permutation results per strategy
+
+If you run permutation tests, include per strategy:
+
+permPValue (or equivalent)
+
+permBetterThanRandomPct (optional)
+
+or a compact permutationStats with mean/p95
+
+B) Per-window breakdown
+
+If you already compute it, add:
+
+windowResults: array keyed by window size with:
+
+avgDelta
+
+beating boolean
+This helps spot “wins only in L20” type behaviour.
+
+What NOT to include
+
+Full draw-by-draw logs
+
+Full permutation distributions (unless you already export them — but keep it optional)
+
+Suggested JSON shape (simple + complete)
+{
+  "runConfigUsed": {
+    "runId": "…",
+    "gameId": "powerball-au",
+    "benchmarkMode": "rolling_walk_forward",
+    "windowSizes": [20,40,60,100],
+    "seed": 42,
+    "randomBaselineRuns": 500,
+    "runPermutation": true,
+    "permutationRuns": 1000,
+    "regimeSplits": true,
+    "presetName": "Significance Check",
+    "createdAt": "2026-03-05T…Z"
+  },
+  "randomStats": { "mean": 0.00, "p05": -0.15, "p95": 0.15 },
+  "strategies": [
+    {
+      "name": "Composite",
+      "avgMain": 1.38,
+      "avgDelta": 0.02,
+      "windowsTested": 4,
+      "windowsBeating": 2,
+      "stabilityClass": "NO EDGE",
+      "permPValue": 0.41,
+      "windowResults": [
+        { "window": 20, "avgDelta": 0.08, "beating": true },
+        { "window": 40, "avgDelta": -0.01, "beating": false }
+      ]
+    }
+  ],
+  "winner": { "name": "Composite", "validated": false, "confidenceTier": "LOW" },
+  "recommendation": { "recommendedStrategyName": "Composite", "lane": "CNF", "confidenceTier": "LOW" }
+}
+Your button: “Dedicated Validation Test”
+
+Make the button export exactly this:
+
+runConfigUsed
+
+randomStats
+
+strategies (summary)
+
+winner + recommendation (even if recommendation is derived)

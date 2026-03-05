@@ -5,7 +5,7 @@ import { Slider } from "@/components/ui/slider";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Zap, Play, CheckCircle, SearchX, Loader2, Info, Sparkles, AlertTriangle, ArrowRight, Shield, Rocket, Download, ChevronDown, ChevronUp, Trophy, Beaker, Settings2, RotateCcw, Eye, EyeOff } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { generatePicks, fetchApi, fetchRecommendation, runAutoGenerate, runAutoCompositeNoFrequency, runAutoOptimiseAndGenerate } from "@/lib/api";
+import { generatePicks, fetchApi, fetchRecommendation, runAutoGenerate, runAutoCompositeNoFrequency, runAutoOptimiseAndGenerate, runAutoPowerHit } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
 import type { GeneratedPick, GeneratorMode, GeneratorRecommendation, PredictionDiffResult, LineDiffMapping } from "@shared/schema";
 import { HelpTip } from "@/components/help-tip";
@@ -407,6 +407,7 @@ export default function PickGenerator() {
 
   const [isLaneARunning, setIsLaneARunning] = useState(false);
   const [isLaneBRunning, setIsLaneBRunning] = useState(false);
+  const [isPowerHitRunning, setIsPowerHitRunning] = useState(false);
   const [laneBStep, setLaneBStep] = useState<string>("");
   const [simpleResult, setSimpleResult] = useState<SimpleResult | null>(null);
   const [showDetails, setShowDetails] = useState(false);
@@ -486,6 +487,23 @@ export default function PickGenerator() {
     }
   };
 
+  const handlePowerHit = async () => {
+    if (!hasData) return;
+    setIsPowerHitRunning(true);
+    setSimpleResult(null);
+    setSimpleDiff(null);
+    try {
+      const result = await runAutoPowerHit(activeGameId);
+      setSimpleResult(result);
+      setSimpleDiff(result.diff ?? null);
+      toast({ title: "PowerHit generated", description: `${result.lineCount || 20} lines covering all ${activeGame?.specialName || "Powerball"} numbers.` });
+    } catch (error: any) {
+      toast({ title: "PowerHit failed", description: error.message, variant: "destructive" });
+    } finally {
+      setIsPowerHitRunning(false);
+    }
+  };
+
   const handleApplyRecommendation = () => {
     if (!recommendation) return;
     setSelectedMode(recommendation.recommendedMode);
@@ -505,7 +523,7 @@ export default function PickGenerator() {
     return null;
   }
 
-  const anyLaneRunning = isLaneARunning || isLaneBRunning;
+  const anyLaneRunning = isLaneARunning || isLaneBRunning || isPowerHitRunning;
 
   return (
     <div className="space-y-6">
@@ -627,6 +645,55 @@ export default function PickGenerator() {
               </CardContent>
             </Card>
           </div>
+
+          {showSpecialBall && (
+            <Card className="border-purple-500/30 bg-purple-500/5" data-testid="card-powerhit">
+              <CardHeader className="pb-3">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <CardTitle className="flex items-center text-lg">
+                      <Zap className="w-5 h-5 mr-2 text-purple-500" />
+                      PowerHit
+                      <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-500 font-mono font-bold">COVERAGE</span>
+                    </CardTitle>
+                    <CardDescription className="mt-1">
+                      Generates {activeGame?.specialPool || 20} lines with the same {activeGame?.mainCount || 7} main numbers, covering every {activeGame?.specialName || "Powerball"} (1–{activeGame?.specialPool || 20}). Equivalent to a real PowerHit entry.
+                    </CardDescription>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <Button
+                  onClick={handlePowerHit}
+                  disabled={anyLaneRunning || !hasData}
+                  size="lg"
+                  variant="outline"
+                  className="w-full border-purple-500/50 text-purple-500 hover:bg-purple-500/10 font-mono font-bold"
+                  data-testid="button-powerhit"
+                >
+                  {isPowerHitRunning ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <Zap className="w-5 h-5 mr-2" />}
+                  {isPowerHitRunning ? "GENERATING..." : `Generate PowerHit (${activeGame?.specialPool || 20} Lines)`}
+                </Button>
+                <div className="grid grid-cols-3 gap-2 text-[10px] font-mono text-muted-foreground">
+                  <div className="p-2 rounded bg-secondary/20 border border-border/30 text-center">
+                    <div className="text-purple-400 font-bold text-xs">{activeGame?.specialPool || 20}</div>
+                    <div>Lines</div>
+                  </div>
+                  <div className="p-2 rounded bg-secondary/20 border border-border/30 text-center">
+                    <div className="text-purple-400 font-bold text-xs">100%</div>
+                    <div>{activeGame?.specialName || "PB"} Coverage</div>
+                  </div>
+                  <div className="p-2 rounded bg-secondary/20 border border-border/30 text-center">
+                    <div className="text-purple-400 font-bold text-xs">~${((activeGame?.specialPool || 20) * 1.575).toFixed(2)}</div>
+                    <div>Est. Cost</div>
+                  </div>
+                </div>
+                <p className="text-[10px] text-muted-foreground/70 font-mono">
+                  To win Div 1 with PowerHit, you only need all {activeGame?.mainCount || 7} mains. Matching all mains also wins Div 2 × {(activeGame?.specialPool || 20) - 1}.
+                </p>
+              </CardContent>
+            </Card>
+          )}
 
           {!hasData && (
             <div className="text-center py-6 text-muted-foreground font-mono text-sm border border-dashed border-border/50 rounded-lg">

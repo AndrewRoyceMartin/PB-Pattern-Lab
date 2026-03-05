@@ -119,6 +119,19 @@ export async function runAutoCompositeNoFrequency(gameId?: string, pbMode?: stri
   return json.data;
 }
 
+export async function runAutoPowerHit(gameId?: string) {
+  const res = await fetch("/api/auto/generate-powerhit", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ gameId }),
+  });
+  const json = await res.json();
+  if (!res.ok || !json.ok) {
+    throw new Error(json.message || "PowerHit generation failed");
+  }
+  return json.data;
+}
+
 export async function runAutoOptimiseAndGenerate(gameId?: string, pbMode?: string) {
   const res = await fetch("/api/auto/optimise-and-generate", {
     method: "POST",

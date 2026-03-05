@@ -450,6 +450,77 @@ export function registerAutoRoutes(app: Express): void {
     }
   });
 
+  app.post("/api/auto/generate-powerhit", async (req, res) => {
+    try {
+      const gameId = (req.body?.gameId as string) || "AU_POWERBALL";
+      const gc = await resolveGameConfig(gameId);
+
+      if (gc.hasSupplementary) {
+        return res.status(400).json({ ok: false, message: "PowerHit is only available for Powerball (not supplementary-based games)." });
+      }
+
+      const draws = await storage.getModernDraws(gameId);
+      if (draws.length < 10) {
+        return res.status(400).json({ ok: false, message: `Only ${draws.length} modern draws available. Need at least 10 for generation. Sync more draws from Data Ingest.` });
+      }
+
+      const seed = 42;
+      console.log(`[auto] Generating PowerHit (${gc.specialPool} lines, all ${gc.specialName}s 1-${gc.specialPool})...`);
+
+      const rng = mulberry32(seed);
+      const { picks: mainNums, formulaScore } = generateDiverseFormulaCard(draws, CNF_WEIGHTS, CNF_FEATURES, rng, 0, gc);
+      const drawFit = Math.round(Math.max(0, Math.min(100, formulaScore * 10)));
+
+      const picks: GeneratedPick[] = [];
+      for (let pb = 1; pb <= gc.specialPool; pb++) {
+        const antiPopResult = scoreAntiPopularity(mainNums, pb);
+        picks.push({
+          rank: pb,
+          numbers: [...mainNums],
+          powerball: pb,
+          drawFit,
+          antiPop: antiPopResult.score,
+          finalScore: Math.round(drawFit * 0.6 + antiPopResult.score * 0.4),
+          antiPopBreakdown: antiPopResult.breakdown,
+        });
+      }
+
+      const latestRun = await storage.getLatestBenchmarkRun(gameId);
+      const formulaHash = hashWeights(CNF_WEIGHTS);
+      const runStamp = buildRunStamp({
+        strategyName: "PowerHit (CNF)",
+        benchmarkRunId: latestRun?.id ?? null,
+        optimiserUsed: false,
+        optimiserRunId: null,
+        formulaHash,
+        seed,
+      });
+
+      const confidence = buildConfidencePanel("Composite No-Frequency", latestRun);
+
+      const { predictionSetId, diff } = await savePredictionAndDiff(
+        picks, gameId, "powerhit", "PowerHit (CNF)", seed,
+        latestRun?.id ?? null, null, formulaHash, gc.mainCount
+      );
+
+      res.json(apiResponse(draws, {
+        runStamp,
+        picks,
+        confidence,
+        predictionSetId,
+        diff,
+        powerHitMains: mainNums,
+        lineCount: gc.specialPool,
+        costEstimate: `~$${(gc.specialPool * 1.575).toFixed(2)}`,
+        strategyDescription: `PowerHit entry: ${gc.mainCount} main numbers chosen by Composite No-Frequency strategy, played against every ${gc.specialName} number (1–${gc.specialPool}). Equivalent to ${gc.specialPool} standard games. Guarantees the winning ${gc.specialName} is covered.`,
+        disclaimer: `PowerHit guarantees you cover the winning ${gc.specialName} number. To win Division 1, you still need to match all ${gc.mainCount} main numbers. This is not a prediction — it is a coverage strategy.`,
+      }));
+    } catch (error: any) {
+      console.error("[auto] PowerHit Error:", error.message);
+      res.status(500).json({ ok: false, message: error.message });
+    }
+  });
+
   app.post("/api/auto/optimise-and-generate", async (req, res) => {
     try {
       const gameId = (req.body?.gameId as string) || undefined;
