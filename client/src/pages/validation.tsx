@@ -483,6 +483,99 @@ export default function Validation() {
     URL.revokeObjectURL(url);
   };
 
+  const handleLoadTestData = () => {
+    const testData = {
+      strategies: [
+        { name: "Composite No-Frequency", avgDelta: 0.02, windowsBeating: 2, windowsTested: 4, stabilityClass: "NO EDGE" },
+        { name: "Composite Recency-Heavy", avgDelta: 0.04, windowsBeating: 3, windowsTested: 4, stabilityClass: "WEAK EDGE" },
+        { name: "Recency Smoothed", avgDelta: 0.01, windowsBeating: 1, windowsTested: 4, stabilityClass: "NO EDGE" },
+        { name: "Composite", avgDelta: 0.05, windowsBeating: 3, windowsTested: 4, stabilityClass: "POSSIBLE EDGE" },
+        { name: "Recency Decay Weighted", avgDelta: -0.01, windowsBeating: 1, windowsTested: 4, stabilityClass: "UNDERPERFORMING" },
+        { name: "Most Drawn (Last 50)", avgDelta: 0.03, windowsBeating: 2, windowsTested: 4, stabilityClass: "NO EDGE" },
+        { name: "Most Drawn (Last 20)", avgDelta: -0.02, windowsBeating: 0, windowsTested: 4, stabilityClass: "UNDERPERFORMING" },
+        { name: "Smoothed Most Drawn (L50)", avgDelta: 0.02, windowsBeating: 2, windowsTested: 4, stabilityClass: "NO EDGE" },
+        { name: "Structure-Matched Random", avgDelta: 0.00, windowsBeating: 2, windowsTested: 4, stabilityClass: "NO EDGE" },
+        { name: "Diversity Optimized", avgDelta: 0.01, windowsBeating: 2, windowsTested: 4, stabilityClass: "NO EDGE" },
+        { name: "Anti-Popular Only", avgDelta: -0.03, windowsBeating: 0, windowsTested: 4, stabilityClass: "UNDERPERFORMING" },
+        { name: "Random", avgDelta: 0.00, windowsBeating: 0, windowsTested: 4, stabilityClass: "NO EDGE" },
+      ],
+      randomStats: { mean: 0.00, p05: -0.15, p95: 0.15 },
+    };
+
+    const mapStabilityClass = (raw: string): "possible_edge" | "weak_edge" | "no_edge" | "underperforming" => {
+      const normalized = raw.toLowerCase().replace(/\s+/g, "_");
+      if (normalized === "possible_edge") return "possible_edge";
+      if (normalized === "weak_edge") return "weak_edge";
+      if (normalized === "underperforming") return "underperforming";
+      return "no_edge";
+    };
+
+    const windows = [20, 40, 60, 100];
+
+    const stabilityByStrategy = testData.strategies.map(s => ({
+      strategy: s.name,
+      windowsTested: s.windowsTested,
+      windowsBeating: s.windowsBeating,
+      windowsLosing: s.windowsTested - s.windowsBeating,
+      avgDelta: s.avgDelta,
+      stabilityClass: mapStabilityClass(s.stabilityClass),
+    }));
+
+    const byWindowByStrategy = testData.strategies.flatMap(s =>
+      windows.map(w => ({
+        strategy: s.name,
+        windowSize: w,
+        testDraws: w,
+        trainDraws: 200 - w,
+        evaluatedDraws: w,
+        skippedDraws: 0,
+        avgMainMatches: 1.40 + s.avgDelta,
+        bestMainMatches: 4,
+        powerballHitRate: 5.0,
+        powerballHits: Math.round(w * 0.05),
+        deltaVsRandom: s.avgDelta,
+        deltaVsRandomMean: s.avgDelta,
+        beatsRandom: s.avgDelta > 0,
+        withinRandomBand: s.avgDelta >= testData.randomStats.p05 && s.avgDelta <= testData.randomStats.p95,
+      }))
+    );
+
+    const testBenchmark: BenchmarkSummary = {
+      byWindowByStrategy,
+      stabilityByStrategy,
+      windowSizesTested: windows,
+      totalDrawsAvailable: 200,
+      overallVerdict: "TEST DATA — This is sample benchmark data for preview. Run a real benchmark to get actual results.",
+      benchmarkMode: "rolling_walk_forward",
+      seed: 42,
+      randomEnsemble: {
+        runs: 200,
+        seed: 42,
+        mean: testData.randomStats.mean,
+        p05: testData.randomStats.p05,
+        p95: testData.randomStats.p95,
+        stdDev: 0.09,
+      },
+      permutationTests: [],
+      presetName: "Test Data",
+    };
+
+    setBenchmark(testBenchmark);
+    setRunConfigUsed({
+      benchmarkMode: "rolling_walk_forward",
+      windowSizes: windows,
+      minTrainDraws: 100,
+      seed: 42,
+      randomBaselineRuns: 200,
+      runPermutation: false,
+      permutationRuns: 0,
+      totalDrawsAvailable: 200,
+      presetName: "Test Data",
+    });
+    setRunTimestamp(new Date().toISOString());
+    toast({ title: "Test data loaded", description: `Loaded ${testData.strategies.length} test strategies with sample benchmark results.` });
+  };
+
   const edgeStrategies = benchmark?.stabilityByStrategy.filter(s => s.stabilityClass === "possible_edge" || s.stabilityClass === "weak_edge") ?? [];
   const noEdgeStrategies = benchmark?.stabilityByStrategy.filter(s => s.stabilityClass === "no_edge") ?? [];
   const underperforming = benchmark?.stabilityByStrategy.filter(s => s.stabilityClass === "underperforming") ?? [];
@@ -522,6 +615,10 @@ export default function Validation() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={handleLoadTestData} disabled={isRunning} className="font-mono" data-testid="button-load-test-data">
+              <Beaker className="w-4 h-4 mr-2" />
+              LOAD TEST DATA
+            </Button>
             <Button onClick={handleRunBenchmark} disabled={isRunning || !hasData} className="bg-primary hover:bg-primary/90 font-mono" data-testid="button-run-benchmark">
               {isRunning ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Play className="w-4 h-4 mr-2" />}
               {isRunning ? "RUNNING..." : "RUN BENCHMARK"}
