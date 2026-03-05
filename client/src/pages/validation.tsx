@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -234,6 +234,7 @@ export default function Validation() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { activeGameId, activeGame } = useGame();
+  const validationExportSeq = useRef(1);
   const { data: stats } = useQuery({ queryKey: ["/api/stats", activeGameId], queryFn: () => fetchApi(`/api/stats?gameId=${activeGameId}`) });
   const { data: validation } = useQuery<ValidationSummary>({ queryKey: ["/api/analysis/validation", activeGameId], queryFn: () => fetchApi(`/api/analysis/validation?gameId=${activeGameId}`), enabled: !!stats?.modernDraws });
   const { data: benchmarkHistory } = useQuery<BenchmarkHistoryItem[]>({
@@ -456,7 +457,9 @@ export default function Validation() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `benchmark_full_${new Date().toISOString().slice(0, 10)}.json`;
+    const seq = String(validationExportSeq.current).padStart(3, "0");
+    a.download = `data_validation_${seq}.json`;
+    validationExportSeq.current++;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -642,7 +645,9 @@ export default function Validation() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `validation_test_${now.slice(0, 10)}.json`;
+    const seq = String(validationExportSeq.current).padStart(3, "0");
+    a.download = `data_validation_${seq}.json`;
+    validationExportSeq.current++;
     a.click();
     URL.revokeObjectURL(url);
 
