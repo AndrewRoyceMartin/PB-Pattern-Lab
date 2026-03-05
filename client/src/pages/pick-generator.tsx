@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
@@ -408,6 +408,7 @@ export default function PickGenerator() {
   const [isLaneARunning, setIsLaneARunning] = useState(false);
   const [isLaneBRunning, setIsLaneBRunning] = useState(false);
   const [isPowerHitRunning, setIsPowerHitRunning] = useState(false);
+  const [powerHitLines, setPowerHitLines] = useState(20);
   const [laneBStep, setLaneBStep] = useState<string>("");
   const [simpleResult, setSimpleResult] = useState<SimpleResult | null>(null);
   const [showDetails, setShowDetails] = useState(false);
@@ -427,6 +428,12 @@ export default function PickGenerator() {
   const hasData = stats?.modernDraws > 0;
 
   const showSpecialBall = !activeGame?.hasSupplementary;
+
+  useEffect(() => {
+    if (activeGame?.specialPool) {
+      setPowerHitLines(activeGame.specialPool);
+    }
+  }, [activeGame?.specialPool]);
 
   const currentMode = MODES.find(m => m.value === selectedMode)!;
   const drawFitWeight = selectedMode === "balanced" ? 100 - customAntiPop[0] : currentMode.drawFit;
@@ -493,10 +500,13 @@ export default function PickGenerator() {
     setSimpleResult(null);
     setSimpleDiff(null);
     try {
-      const result = await runAutoPowerHit(activeGameId);
+      const result = await runAutoPowerHit(activeGameId, powerHitLines);
       setSimpleResult(result);
       setSimpleDiff(result.diff ?? null);
-      toast({ title: "PowerHit generated", description: `${result.lineCount || 20} lines covering all ${activeGame?.specialName || "Powerball"} numbers.` });
+      const coverageDesc = result.isFullCoverage
+        ? `${result.lineCount} lines covering all ${activeGame?.specialName || "Powerball"} numbers`
+        : `${result.lineCount} lines covering top ${activeGame?.specialName || "Powerball"} numbers (${result.coveragePct}%)`;
+      toast({ title: "PowerHit generated", description: coverageDesc });
     } catch (error: any) {
       toast({ title: "PowerHit failed", description: error.message, variant: "destructive" });
     } finally {
@@ -657,12 +667,47 @@ export default function PickGenerator() {
                       <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-500 font-mono font-bold">COVERAGE</span>
                     </CardTitle>
                     <CardDescription className="mt-1">
-                      Generates {activeGame?.specialPool || 20} lines with the same {activeGame?.mainCount || 7} main numbers, covering every {activeGame?.specialName || "Powerball"} (1–{activeGame?.specialPool || 20}). Equivalent to a real PowerHit entry.
+                      {powerHitLines === (activeGame?.specialPool || 20)
+                        ? `Generates ${activeGame?.specialPool || 20} lines with the same ${activeGame?.mainCount || 7} main numbers, covering every ${activeGame?.specialName || "Powerball"} (1–${activeGame?.specialPool || 20}).`
+                        : `Generates ${powerHitLines} lines using the top ${activeGame?.specialName || "Powerball"} numbers by recent frequency. ${Math.round((powerHitLines / (activeGame?.specialPool || 20)) * 100)}% coverage.`}
                     </CardDescription>
                   </div>
                 </div>
               </CardHeader>
               <CardContent className="space-y-3">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-mono text-muted-foreground">Lines</label>
+                    <span className="text-[11px] font-mono text-purple-400 font-bold">{powerHitLines} / {activeGame?.specialPool || 20}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range"
+                      min={1}
+                      max={activeGame?.specialPool || 20}
+                      value={powerHitLines}
+                      onChange={(e) => setPowerHitLines(Number(e.target.value))}
+                      className="w-full h-2 rounded-lg appearance-none cursor-pointer accent-purple-500 bg-purple-500/20"
+                      data-testid="slider-powerhit-lines"
+                    />
+                  </div>
+                  <div className="flex gap-1.5 flex-wrap">
+                    {[5, 10, 15, activeGame?.specialPool || 20].map(preset => (
+                      <button
+                        key={preset}
+                        onClick={() => setPowerHitLines(preset)}
+                        className={`px-2 py-0.5 rounded text-[10px] font-mono border transition-colors ${
+                          powerHitLines === preset
+                            ? "bg-purple-500/20 border-purple-500/50 text-purple-400 font-bold"
+                            : "bg-secondary/20 border-border/30 text-muted-foreground hover:border-purple-500/30"
+                        }`}
+                        data-testid={`button-powerhit-preset-${preset}`}
+                      >
+                        {preset === (activeGame?.specialPool || 20) ? `All ${preset}` : preset}
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <Button
                   onClick={handlePowerHit}
                   disabled={anyLaneRunning || !hasData}
@@ -672,24 +717,26 @@ export default function PickGenerator() {
                   data-testid="button-powerhit"
                 >
                   {isPowerHitRunning ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <Zap className="w-5 h-5 mr-2" />}
-                  {isPowerHitRunning ? "GENERATING..." : `Generate PowerHit (${activeGame?.specialPool || 20} Lines)`}
+                  {isPowerHitRunning ? "GENERATING..." : `Generate PowerHit (${powerHitLines} Lines)`}
                 </Button>
                 <div className="grid grid-cols-3 gap-2 text-[10px] font-mono text-muted-foreground">
                   <div className="p-2 rounded bg-secondary/20 border border-border/30 text-center">
-                    <div className="text-purple-400 font-bold text-xs">{activeGame?.specialPool || 20}</div>
+                    <div className="text-purple-400 font-bold text-xs">{powerHitLines}</div>
                     <div>Lines</div>
                   </div>
                   <div className="p-2 rounded bg-secondary/20 border border-border/30 text-center">
-                    <div className="text-purple-400 font-bold text-xs">100%</div>
+                    <div className="text-purple-400 font-bold text-xs">{powerHitLines === (activeGame?.specialPool || 20) ? "100%" : `${Math.round((powerHitLines / (activeGame?.specialPool || 20)) * 100)}%`}</div>
                     <div>{activeGame?.specialName || "PB"} Coverage</div>
                   </div>
                   <div className="p-2 rounded bg-secondary/20 border border-border/30 text-center">
-                    <div className="text-purple-400 font-bold text-xs">~${((activeGame?.specialPool || 20) * 1.575).toFixed(2)}</div>
+                    <div className="text-purple-400 font-bold text-xs">~${(powerHitLines * 1.575).toFixed(2)}</div>
                     <div>Est. Cost</div>
                   </div>
                 </div>
                 <p className="text-[10px] text-muted-foreground/70 font-mono">
-                  To win Div 1 with PowerHit, you only need all {activeGame?.mainCount || 7} mains. Matching all mains also wins Div 2 × {(activeGame?.specialPool || 20) - 1}.
+                  {powerHitLines === (activeGame?.specialPool || 20)
+                    ? `Full coverage: guarantees the winning ${activeGame?.specialName || "Powerball"} is included.`
+                    : `Partial coverage: top ${powerHitLines} ${activeGame?.specialName || "Powerball"} numbers selected by recent draw frequency (last 50 draws).`}
                 </p>
               </CardContent>
             </Card>

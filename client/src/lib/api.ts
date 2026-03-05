@@ -119,11 +119,11 @@ export async function runAutoCompositeNoFrequency(gameId?: string, pbMode?: stri
   return json.data;
 }
 
-export async function runAutoPowerHit(gameId?: string) {
+export async function runAutoPowerHit(gameId?: string, lineCount?: number) {
   const res = await fetch("/api/auto/generate-powerhit", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ gameId }),
+    body: JSON.stringify({ gameId, lineCount }),
   });
   const json = await res.json();
   if (!res.ok || !json.ok) {

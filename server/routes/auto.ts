@@ -464,18 +464,35 @@ export function registerAutoRoutes(app: Express): void {
         return res.status(400).json({ ok: false, message: `Only ${draws.length} modern draws available. Need at least 10 for generation. Sync more draws from Data Ingest.` });
       }
 
+      const requestedLines = Math.max(1, Math.min(gc.specialPool, Number(req.body?.lineCount) || gc.specialPool));
+      const isFullCoverage = requestedLines === gc.specialPool;
+
       const seed = 42;
-      console.log(`[auto] Generating PowerHit (${gc.specialPool} lines, all ${gc.specialName}s 1-${gc.specialPool})...`);
+      console.log(`[auto] Generating PowerHit (${requestedLines}/${gc.specialPool} lines)...`);
 
       const rng = mulberry32(seed);
       const { picks: mainNums, formulaScore } = generateDiverseFormulaCard(draws, CNF_WEIGHTS, CNF_FEATURES, rng, 0, gc);
       const drawFit = Math.round(Math.max(0, Math.min(100, formulaScore * 10)));
 
+      let selectedPBs: number[];
+      if (isFullCoverage) {
+        selectedPBs = Array.from({ length: gc.specialPool }, (_, i) => i + 1);
+      } else {
+        const recentDraws = draws.slice(0, Math.min(50, draws.length));
+        const pbFreqs: Record<number, number> = {};
+        recentDraws.forEach(d => { pbFreqs[d.powerball] = (pbFreqs[d.powerball] || 0) + 1; });
+        const pbRanked = Array.from({ length: gc.specialPool }, (_, i) => ({
+          number: i + 1,
+          freq: pbFreqs[i + 1] || 0,
+        })).sort((a, b) => b.freq - a.freq || a.number - b.number);
+        selectedPBs = pbRanked.slice(0, requestedLines).map(p => p.number).sort((a, b) => a - b);
+      }
+
       const picks: GeneratedPick[] = [];
-      for (let pb = 1; pb <= gc.specialPool; pb++) {
+      selectedPBs.forEach((pb, idx) => {
         const antiPopResult = scoreAntiPopularity(mainNums, pb);
         picks.push({
-          rank: pb,
+          rank: idx + 1,
           numbers: [...mainNums],
           powerball: pb,
           drawFit,
@@ -483,7 +500,7 @@ export function registerAutoRoutes(app: Express): void {
           finalScore: Math.round(drawFit * 0.6 + antiPopResult.score * 0.4),
           antiPopBreakdown: antiPopResult.breakdown,
         });
-      }
+      });
 
       const latestRun = await storage.getLatestBenchmarkRun(gameId);
       const formulaHash = hashWeights(CNF_WEIGHTS);
@@ -503,6 +520,12 @@ export function registerAutoRoutes(app: Express): void {
         latestRun?.id ?? null, null, formulaHash, gc.mainCount
       );
 
+      const coveragePct = Math.round((requestedLines / gc.specialPool) * 100);
+      const coverageLabel = isFullCoverage ? "Full coverage" : `${coveragePct}% coverage (${requestedLines}/${gc.specialPool})`;
+      const pbSelectionNote = isFullCoverage
+        ? `All ${gc.specialName} numbers 1–${gc.specialPool}`
+        : `Top ${requestedLines} ${gc.specialName} numbers by recent frequency (last 50 draws)`;
+
       res.json(apiResponse(draws, {
         runStamp,
         picks,
@@ -510,10 +533,18 @@ export function registerAutoRoutes(app: Express): void {
         predictionSetId,
         diff,
         powerHitMains: mainNums,
-        lineCount: gc.specialPool,
-        costEstimate: `~$${(gc.specialPool * 1.575).toFixed(2)}`,
-        strategyDescription: `PowerHit entry: ${gc.mainCount} main numbers chosen by Composite No-Frequency strategy, played against every ${gc.specialName} number (1–${gc.specialPool}). Equivalent to ${gc.specialPool} standard games. Guarantees the winning ${gc.specialName} is covered.`,
-        disclaimer: `PowerHit guarantees you cover the winning ${gc.specialName} number. To win Division 1, you still need to match all ${gc.mainCount} main numbers. This is not a prediction — it is a coverage strategy.`,
+        lineCount: requestedLines,
+        totalPool: gc.specialPool,
+        isFullCoverage,
+        coveragePct,
+        coverageLabel,
+        pbSelectionNote,
+        selectedPBs,
+        costEstimate: `~$${(requestedLines * 1.575).toFixed(2)}`,
+        strategyDescription: `PowerHit entry: ${gc.mainCount} main numbers chosen by Composite No-Frequency strategy, played against ${isFullCoverage ? `every` : `the top ${requestedLines}`} ${gc.specialName} number${isFullCoverage ? ` (1–${gc.specialPool})` : ` by recent frequency`}. ${coverageLabel}. Equivalent to ${requestedLines} standard games.`,
+        disclaimer: isFullCoverage
+          ? `PowerHit guarantees you cover the winning ${gc.specialName} number. To win Division 1, you still need to match all ${gc.mainCount} main numbers. This is not a prediction — it is a coverage strategy.`
+          : `Partial PowerHit covers ${requestedLines} of ${gc.specialPool} ${gc.specialName} numbers (${coveragePct}%). Selected by recent draw frequency. Not a prediction — a coverage strategy.`,
       }));
     } catch (error: any) {
       console.error("[auto] PowerHit Error:", error.message);
